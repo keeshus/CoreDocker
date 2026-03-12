@@ -1,0 +1,23 @@
+{
+  "name": "core-docker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "backend": "node backend/index.js",
+    "frontend:dev": "next dev frontend",
+    "frontend:build": "next build frontend",
+    "frontend:start": "next start frontend"
+  },
+  "dependencies": {
+    "dockerode": "latest",
+    "express": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "lucide-react": "latest"
+  },
+  "devDependencies": {
+    "nodemon": "latest"
+  },
+  "type": "module"
+}
