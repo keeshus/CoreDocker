@@ -5,7 +5,7 @@ export default function Home() {
   const [containers, setContainers] = useState([]);
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error] = useState(null);
   const [stats, setStats] = useState({});
   const [events, setEvents] = useState([]);
   const [expandedContainer, setExpandedContainer] = useState(null);
