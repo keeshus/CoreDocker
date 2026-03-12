@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import ContainerRow from '../components/ContainerRow';
 
 export default function Home() {
@@ -9,6 +9,7 @@ export default function Home() {
   const [stats, setStats] = useState({});
   const [events, setEvents] = useState([]);
   const [expandedContainer, setExpandedContainer] = useState(null);
+  const eventScrollRef = useRef(null);
 
   const refreshData = async () => {
     try {
@@ -31,7 +32,7 @@ export default function Home() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'docker-event') {
-          setEvents(prev => [{ id: Date.now() + Math.random(), time: new Date().toLocaleTimeString(), ...data }, ...prev].slice(0, 10));
+          setEvents(prev => [{ id: Date.now() + Math.random(), time: new Date().toLocaleTimeString(), ...data }, ...prev].slice(0, 20)); // Descending (newest at top)
           refreshData();
         } else if (data.type === 'container-stats') {
           setStats(prev => ({ ...prev, [data.id]: data }));
@@ -42,34 +43,52 @@ export default function Home() {
     return () => eventSource.close();
   }, []);
 
+  useEffect(() => {
+    // No auto-scroll needed for descending order
+  }, [events]);
+
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
   if (error) return <div style={{ padding: '20px', color: 'red' }}>Error: {error}</div>;
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1>Docker Manager</h1>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', marginBottom: '40px' }}>
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1400px', margin: '0 auto' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h1 style={{ margin: 0 }}>Docker Manager</h1>
         {info && (
-          <section style={{ padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <h2 style={{ marginTop: 0 }}>System</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.9em' }}>
-              <p><strong>OS:</strong> {info.OperatingSystem}</p>
-              <p><strong>Containers:</strong> {info.Containers} (Run: {info.ContainersRunning})</p>
-              <p><strong>CPUs:</strong> {info.NCPU}</p>
-              <p><strong>Kernel:</strong> {info.KernelVersion}</p>
-            </div>
-          </section>
+          <div style={{ 
+            display: 'flex', gap: '20px', fontSize: '0.85em', background: '#f8fafc', 
+            padding: '8px 15px', borderRadius: '20px', border: '1px solid #e2e8f0', color: '#64748b' 
+          }}>
+            <span><strong>OS:</strong> {info.OperatingSystem}</span>
+            <span><strong>Kernel:</strong> {info.KernelVersion}</span>
+            <span><strong>Containers:</strong> {info.Containers} (Run: {info.ContainersRunning})</span>
+            <span><strong>CPUs:</strong> {info.NCPU}</span>
+          </div>
         )}
-
+      </header>
+      
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '40px' }}>
         <section style={{ padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <h2 style={{ marginTop: 0 }}>Events</h2>
-          <div style={{ maxHeight: '150px', overflowY: 'auto', fontSize: '0.85em' }}>
-            {events.length === 0 ? <p color="#64748b">Waiting...</p> : (
-              <ul style={{ listStyle: 'none', padding: 0 }}>
+          <h2 style={{ marginTop: 0, fontSize: '1.2em', display: 'flex', justifyContent: 'space-between' }}>
+            Live Events 
+            <span style={{ fontSize: '0.6em', color: '#94a3b8', fontWeight: 'normal' }}>Showing last 20 events</span>
+          </h2>
+          <div 
+            ref={eventScrollRef}
+            style={{ maxHeight: '250px', overflowY: 'auto', fontSize: '0.85em', background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #f1f5f9' }}
+          >
+            {events.length === 0 ? <p style={{ color: '#94a3b8', margin: 0 }}>Waiting for events...</p> : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                 {events.map(e => (
-                  <li key={e.id} style={{ padding: '4px 0', borderBottom: '1px solid #f1f5f9' }}>
-                    <span style={{ color: '#94a3b8' }}>[{e.time}]</span> <strong>{e.action}</strong> {e.name}
+                  <li key={e.id} style={{ padding: '6px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center' }}>
+                    <span style={{ color: '#94a3b8', fontFamily: 'monospace', width: '100px' }}>[{e.time}]</span> 
+                    <span style={{ 
+                      display: 'inline-block', width: '80px', fontWeight: 'bold', textTransform: 'uppercase', 
+                      color: ['die', 'kill', 'stop'].includes(e.action) ? '#ef4444' : '#10b981'
+                    }}>
+                      {e.action}
+                    </span> 
+                    <span style={{ color: '#1e293b' }}>{e.name}</span>
                   </li>
                 ))}
               </ul>
@@ -79,15 +98,15 @@ export default function Home() {
       </div>
 
       <section>
-        <h2>Containers</h2>
+        <h2 style={{ fontSize: '1.5em' }}>Containers</h2>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>
+            <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
               <th style={{ padding: '12px 10px' }}>Name</th>
               <th style={{ padding: '12px 10px' }}>Image</th>
               <th style={{ padding: '12px 10px' }}>State</th>
               <th style={{ padding: '12px 10px' }}>CPU %</th>
-              <th style={{ padding: '12px 10px' }}>Mem</th>
+              <th style={{ padding: '12px 10px' }}>Memory</th>
               <th style={{ padding: '12px 10px' }}>Status</th>
             </tr>
           </thead>
