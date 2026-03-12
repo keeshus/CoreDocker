@@ -32,7 +32,14 @@ export default function Home() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'docker-event') {
-          setEvents(prev => [{ id: Date.now() + Math.random(), time: new Date().toLocaleTimeString(), ...data }, ...prev].slice(0, 20)); // Descending (newest at top)
+          setEvents(prev => {
+            const newEvents = [...prev, { 
+              id: Date.now() + Math.random(), 
+              time: new Date().toLocaleTimeString(), 
+              ...data 
+            }].slice(-20);
+            return newEvents;
+          });
           refreshData();
         } else if (data.type === 'container-stats') {
           setStats(prev => ({ ...prev, [data.id]: data }));
@@ -44,7 +51,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    // No auto-scroll needed for descending order
+    // Scroll to top when events change (newest is at top)
+    if (eventScrollRef.current) {
+      eventScrollRef.current.scrollTop = 0;
+    }
   }, [events]);
 
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
@@ -78,7 +88,7 @@ export default function Home() {
             style={{ maxHeight: '250px', overflowY: 'auto', fontSize: '0.85em', background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #f1f5f9' }}
           >
             {events.length === 0 ? <p style={{ color: '#94a3b8', margin: 0 }}>Waiting for events...</p> : (
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column-reverse' }}>
                 {events.map(e => (
                   <li key={e.id} style={{ padding: '6px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#94a3b8', fontFamily: 'monospace', width: '100px' }}>[{e.time}]</span> 

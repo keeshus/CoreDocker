@@ -9,7 +9,7 @@ export default function ContainerLogs({ containerId }) {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        setLogs(prev => [...prev, data.log].slice(-100));
+        setLogs(prev => [data.log, ...prev].slice(0, 100));
       } catch (e) {}
     };
     eventSource.onerror = () => eventSource.close();
@@ -17,7 +17,7 @@ export default function ContainerLogs({ containerId }) {
   }, [containerId]);
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [logs]);
 
   return (
