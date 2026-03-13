@@ -7,6 +7,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./nginx/conf.d:/app/nginx/conf.d
       - ./nginx/ssl:/app/nginx/ssl
+      - ./data:/app/data
     ports:
       - "3001:3000"
     restart: always

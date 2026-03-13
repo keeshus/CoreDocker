@@ -9,12 +9,14 @@
     "frontend:start": "next start frontend"
   },
   "dependencies": {
+    "better-sqlite3": "latest",
     "dockerode": "latest",
     "express": "latest",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest"
+    "lucide-react": "latest",
+    "uuid": "latest"
   },
   "devDependencies": {
     "nodemon": "latest"

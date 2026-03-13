@@ -32,6 +32,15 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle })
       >
         <td style={{ padding: '12px 10px', fontWeight: '500' }}>
           {isExpanded ? '▼ ' : '▶ '} {container.Names[0].replace('/', '')}
+          {container.isPersisted && (
+            <span style={{
+              marginLeft: '8px', padding: '2px 6px', borderRadius: '4px', 
+              fontSize: '0.75em', background: '#e0e7ff', color: '#3730a3',
+              fontWeight: 'bold', verticalAlign: 'middle'
+            }} title="Managed by Core Docker (Persisted)">
+              DB
+            </span>
+          )}
         </td>
         <td style={{ padding: '12px 10px', fontSize: '0.85em', color: '#64748b' }}>{container.Image}</td>
         <td style={{ padding: '12px 10px' }}>
