@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.post('/', async (req, res) => {
   try {
-    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {} } = req.body;
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, networkContainers = [] } = req.body;
 
     // Pull image if not exists
     try {
@@ -49,6 +49,20 @@ router.post('/', async (req, res) => {
 
     const container = await docker.createContainer(createOpts);
     await container.start();
+
+    // Create a dedicated network if there are selected containers to link with
+    if (networkContainers && networkContainers.length > 0) {
+      const networkName = `net-${name}`;
+      const network = await docker.createNetwork({ Name: networkName });
+      
+      // Connect the newly created container to this new network
+      await network.connect({ Container: container.id });
+      
+      // Connect selected existing containers to this new network
+      for (const targetContainerId of networkContainers) {
+        await network.connect({ Container: targetContainerId });
+      }
+    }
 
     if (proxy.enabled && proxy.uri && proxy.port) {
       await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);

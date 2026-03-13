@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function CreateContainer({ onCreated }) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [existingContainers, setExistingContainers] = useState([]);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -12,8 +13,18 @@ export default function CreateContainer({ onCreated }) {
     volumes: [{ host: '', container: '' }],
     ports: [{ host: '', container: '', ip: '0.0.0.0' }],
     resources: { cpu: '', memory: '' },
-    proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' }
+    proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
+    networkContainers: []
   });
+
+  useEffect(() => {
+    if (isOpen) {
+      fetch('/api/proxy/containers')
+        .then(res => res.json())
+        .then(data => setExistingContainers(data))
+        .catch(console.error);
+    }
+  }, [isOpen]);
 
   const handleArrayChange = (field, index, key, value) => {
     const newArray = [...formData[field]];
@@ -186,6 +197,35 @@ export default function CreateContainer({ onCreated }) {
                   <div style={{ flex: 1 }}>
                     <label style={{ display: 'block', fontSize: '0.9em', marginBottom: '5px' }}>Memory (MB)</label>
                     <input type="number" placeholder="e.g. 512" value={formData.resources.memory} onChange={e => setFormData({...formData, resources: {...formData.resources, memory: e.target.value}})} style={{ width: '100%', padding: '8px' }} />
+                  </div>
+                </div>
+              </details>
+
+              <details>
+                <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Network Grouping (Private Network)</summary>
+                <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none' }}>
+                  <p style={{ margin: '0 0 10px 0', fontSize: '0.9em', color: '#64748b' }}>Select other containers to link them securely with this container in an isolated network.</p>
+                  <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '10px' }}>
+                    {existingContainers.length === 0 ? <p style={{ margin: 0, fontSize: '0.9em' }}>No other containers found.</p> : existingContainers.map(c => {
+                      const cName = c.Names[0].replace(/^\//, '');
+                      // Skip self or proxy
+                      if (cName === 'core-proxy') return null;
+                      return (
+                        <label key={c.Id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '0.9em' }}>
+                          <input 
+                            type="checkbox" 
+                            checked={formData.networkContainers.includes(c.Id)}
+                            onChange={(e) => {
+                              const newSelection = e.target.checked 
+                                ? [...formData.networkContainers, c.Id] 
+                                : formData.networkContainers.filter(id => id !== c.Id);
+                              setFormData({...formData, networkContainers: newSelection});
+                            }}
+                          />
+                          {cName} ({c.Image})
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               </details>
