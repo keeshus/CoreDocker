@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import ContainerRow from '../components/ContainerRow';
+import CreateContainer from '../components/CreateContainer';
 
 export default function Home() {
   const [containers, setContainers] = useState([]);
@@ -64,17 +65,20 @@ export default function Home() {
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1400px', margin: '0 auto' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h1 style={{ margin: 0 }}>Docker Manager</h1>
-        {info && (
-          <div style={{ 
-            display: 'flex', gap: '20px', fontSize: '0.85em', background: '#f8fafc', 
-            padding: '8px 15px', borderRadius: '20px', border: '1px solid #e2e8f0', color: '#64748b' 
-          }}>
-            <span><strong>OS:</strong> {info.OperatingSystem}</span>
-            <span><strong>Kernel:</strong> {info.KernelVersion}</span>
-            <span><strong>Containers:</strong> {info.Containers} (Run: {info.ContainersRunning})</span>
-            <span><strong>CPUs:</strong> {info.NCPU}</span>
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          {info && (
+            <div style={{ 
+              display: 'flex', gap: '20px', fontSize: '0.85em', background: '#f8fafc', 
+              padding: '8px 15px', borderRadius: '20px', border: '1px solid #e2e8f0', color: '#64748b' 
+            }}>
+              <span><strong>OS:</strong> {info.OperatingSystem}</span>
+              <span><strong>Kernel:</strong> {info.KernelVersion}</span>
+              <span><strong>Containers:</strong> {info.Containers} (Run: {info.ContainersRunning})</span>
+              <span><strong>CPUs:</strong> {info.NCPU}</span>
+            </div>
+          )}
+          <CreateContainer onCreated={refreshData} />
+        </div>
       </header>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '40px' }}>

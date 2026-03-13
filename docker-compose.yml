@@ -5,6 +5,8 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./nginx/conf.d:/app/nginx/conf.d
+      - ./nginx/ssl:/app/nginx/ssl
     ports:
       - "3001:3000"
     restart: always
@@ -18,3 +20,20 @@ services:
     depends_on:
       - backend
     restart: always
+
+  nginx:
+    image: nginx:latest
+    container_name: core-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+    networks:
+      - web-proxy
+    restart: always
+
+networks:
+  web-proxy:
+    name: web-proxy

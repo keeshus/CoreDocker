@@ -1,7 +1,82 @@
 import express from 'express';
 import docker from '../services/docker.js';
+import { addRoute, removeRoute } from '../services/nginx.js';
 
 const router = express.Router();
+
+router.post('/', async (req, res) => {
+  try {
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {} } = req.body;
+
+    // Pull image if not exists
+    try {
+      await docker.getImage(image).inspect();
+    } catch (e) {
+      await new Promise((resolve, reject) => {
+        docker.pull(image, (err, stream) => {
+          if (err) return reject(err);
+          docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
+        });
+      });
+    }
+
+    const PortBindings = {};
+    const ExposedPorts = {};
+    ports.forEach(p => {
+      const cPort = `${p.container}/tcp`;
+      ExposedPorts[cPort] = {};
+      if (!PortBindings[cPort]) PortBindings[cPort] = [];
+      PortBindings[cPort].push({
+        HostIp: p.ip || '',
+        HostPort: p.host ? p.host.toString() : ''
+      });
+    });
+
+    const createOpts = {
+      Image: image,
+      name: name,
+      Env: env.map(e => `${e.key}=${e.value}`),
+      ExposedPorts,
+      HostConfig: {
+        RestartPolicy: { Name: restartPolicy },
+        Binds: volumes.map(v => `${v.host}:${v.container}`),
+        PortBindings,
+        Memory: resources.memory ? resources.memory * 1024 * 1024 : 0,
+        NanoCPUs: resources.cpu ? resources.cpu * 1000000000 : 0,
+        NetworkMode: 'web-proxy'
+      }
+    };
+
+    const container = await docker.createContainer(createOpts);
+    await container.start();
+
+    if (proxy.enabled && proxy.uri && proxy.port) {
+      await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
+    }
+
+    res.status(201).json({ message: 'Container created successfully', id: container.id });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create container', details: error.message });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const container = docker.getContainer(req.params.id);
+    const inspect = await container.inspect();
+    const name = inspect.Name.replace(/^\//, ''); // Remove leading slash
+    
+    await container.stop();
+    await container.remove();
+    
+    // Attempt to remove proxy route if it exists
+    await removeRoute(name);
+    
+    res.json({ message: 'Container removed successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove container', details: error.message });
+  }
+});
 
 router.get('/', async (req, res) => {
   try {
