@@ -1,10 +1,62 @@
 import express from 'express';
 import docker from '../services/docker.js';
 import { addRoute, removeRoute } from '../services/nginx.js';
-import { saveContainer, deleteContainer } from '../services/db.js';
+import { saveContainer, deleteContainer, getContainerByName } from '../services/db.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
+
+const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resources) => {
+  const PortBindings = {};
+  const ExposedPorts = {};
+  (ports || []).forEach(p => {
+    const cPort = `${p.container}/tcp`;
+    ExposedPorts[cPort] = {};
+    if (!PortBindings[cPort]) PortBindings[cPort] = [];
+    PortBindings[cPort].push({
+      HostIp: p.ip || '',
+      HostPort: p.host ? p.host.toString() : ''
+    });
+  });
+
+  return {
+    Image: image,
+    name: name,
+    Env: (env || []).map(e => `${e.key}=${e.value}`),
+    ExposedPorts,
+    HostConfig: {
+      RestartPolicy: { Name: restartPolicy },
+      Binds: (volumes || []).map(v => `${v.host}:${v.container}`),
+      PortBindings,
+      Memory: resources?.memory ? resources.memory * 1024 * 1024 : 0,
+      NanoCPUs: resources?.cpu ? resources.cpu * 1000000000 : 0,
+      NetworkMode: 'web-proxy'
+    }
+  };
+};
+
+const ensureNetworkConnections = async (name, containerId, networkContainers) => {
+  if (networkContainers && networkContainers.length > 0) {
+    const networkName = `net-${name}`;
+    let network;
+    try {
+      network = docker.getNetwork(networkName);
+      await network.inspect();
+    } catch (e) {
+      network = await docker.createNetwork({ Name: networkName });
+    }
+    
+    try { await network.connect({ Container: containerId }); } catch(e) {}
+    
+    for (const targetContainerId of networkContainers) {
+      try {
+        await network.connect({ Container: targetContainerId });
+      } catch (e) {
+        console.error(`Could not connect ${targetContainerId} to ${networkName}`, e);
+      }
+    }
+  }
+};
 
 router.post('/', async (req, res) => {
   try {
@@ -28,63 +80,14 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const PortBindings = {};
-    const ExposedPorts = {};
-    ports.forEach(p => {
-      const cPort = `${p.container}/tcp`;
-      ExposedPorts[cPort] = {};
-      if (!PortBindings[cPort]) PortBindings[cPort] = [];
-      PortBindings[cPort].push({
-        HostIp: p.ip || '',
-        HostPort: p.host ? p.host.toString() : ''
-      });
-    });
-
-    const createOpts = {
-      Image: image,
-      name: name,
-      Env: env.map(e => `${e.key}=${e.value}`),
-      ExposedPorts,
-      HostConfig: {
-        RestartPolicy: { Name: restartPolicy },
-        Binds: volumes.map(v => `${v.host}:${v.container}`),
-        PortBindings,
-        Memory: resources.memory ? resources.memory * 1024 * 1024 : 0,
-        NanoCPUs: resources.cpu ? resources.cpu * 1000000000 : 0,
-        NetworkMode: 'web-proxy'
-      }
-    };
-
+    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources);
     const container = await docker.createContainer(createOpts);
     
     // Update docker_id in DB
     saveContainer(containerId, name, config, 'running', container.id);
 
     await container.start();
-
-    // Create a dedicated network if there are selected containers to link with
-    if (networkContainers && networkContainers.length > 0) {
-      const networkName = `net-${name}`;
-      let network;
-      try {
-        network = docker.getNetwork(networkName);
-        await network.inspect();
-      } catch (e) {
-        network = await docker.createNetwork({ Name: networkName });
-      }
-      
-      // Connect the newly created container to this new network
-      await network.connect({ Container: container.id });
-      
-      // Connect selected existing containers to this new network
-      for (const targetContainerId of networkContainers) {
-        try {
-          await network.connect({ Container: targetContainerId });
-        } catch (e) {
-          console.error(`Could not connect ${targetContainerId} to ${networkName}`, e);
-        }
-      }
-    }
+    await ensureNetworkConnections(name, container.id, networkContainers);
 
     if (proxy.enabled && proxy.uri && proxy.port) {
       await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
@@ -93,6 +96,130 @@ router.post('/', async (req, res) => {
     res.status(201).json({ message: 'Container created successfully', id: container.id, db_id: containerId });
   } catch (error) {
     res.status(500).json({ error: 'Failed to create container', details: error.message });
+  }
+});
+
+router.put('/:id', async (req, res) => {
+  try {
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, networkContainers = [] } = req.body;
+    
+    // 1. Get the existing container and remove it
+    let container = docker.getContainer(req.params.id);
+    let inspect;
+    try {
+      inspect = await container.inspect();
+    } catch(e) {
+      return res.status(404).json({ error: 'Container not found in Docker' });
+    }
+
+    const oldName = inspect.Name.replace(/^\//, '');
+    await container.stop();
+    await container.remove();
+    await removeRoute(oldName);
+
+    // 2. Update DB intent
+    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, networkContainers };
+    const dbContainer = getContainerByName(oldName);
+    let dbId = dbContainer ? dbContainer.id : uuidv4();
+    
+    if (dbContainer && oldName !== name) {
+      // Name changed, we might need to recreate the DB entry to avoid unique constraint issues if we just updated it, 
+      // but ON CONFLICT(name) handles it. Actually better to delete old name and create new if name changes.
+      deleteContainer(dbContainer.id);
+      dbId = uuidv4();
+    }
+    
+    saveContainer(dbId, name, config, 'running');
+
+    // Pull image if not exists
+    try {
+      await docker.getImage(image).inspect();
+    } catch (e) {
+      await new Promise((resolve, reject) => {
+        docker.pull(image, (err, stream) => {
+          if (err) return reject(err);
+          docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
+        });
+      });
+    }
+
+    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources);
+    container = await docker.createContainer(createOpts);
+    
+    saveContainer(dbId, name, config, 'running', container.id);
+
+    await container.start();
+    await ensureNetworkConnections(name, container.id, networkContainers);
+
+    if (proxy.enabled && proxy.uri && proxy.port) {
+      await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
+    }
+
+    res.json({ message: 'Container updated successfully', id: container.id, db_id: dbId });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update container', details: error.message });
+  }
+});
+
+router.post('/:id/persist', async (req, res) => {
+  try {
+    const container = docker.getContainer(req.params.id);
+    const inspect = await container.inspect();
+    const name = inspect.Name.replace(/^\//, '');
+
+    const dbContainer = getContainerByName(name);
+    if (dbContainer) {
+      return res.status(400).json({ error: 'Container is already persisted' });
+    }
+
+    // Infer config from inspect data
+    const env = (inspect.Config.Env || []).map(e => {
+      const idx = e.indexOf('=');
+      if (idx === -1) return { key: e, value: '' };
+      return { key: e.substring(0, idx), value: e.substring(idx + 1) };
+    });
+
+    const volumes = (inspect.HostConfig.Binds || []).map(b => {
+      const parts = b.split(':');
+      return { host: parts[0], container: parts[1] };
+    });
+
+    const ports = [];
+    if (inspect.NetworkSettings.Ports) {
+      Object.keys(inspect.NetworkSettings.Ports).forEach(cPort => {
+        const mappings = inspect.NetworkSettings.Ports[cPort];
+        const cPortNum = cPort.split('/')[0];
+        if (mappings) {
+          mappings.forEach(m => {
+            ports.push({ ip: m.HostIp, host: m.HostPort, container: cPortNum });
+          });
+        }
+      });
+    }
+
+    const resources = {
+      cpu: inspect.HostConfig.NanoCPUs ? inspect.HostConfig.NanoCPUs / 1000000000 : null,
+      memory: inspect.HostConfig.Memory ? inspect.HostConfig.Memory / (1024 * 1024) : null,
+    };
+
+    const config = {
+      image: inspect.Config.Image,
+      name: name,
+      env,
+      volumes,
+      ports,
+      restartPolicy: inspect.HostConfig.RestartPolicy.Name || 'unless-stopped',
+      resources,
+      proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
+      networkContainers: []
+    };
+
+    const containerId = uuidv4();
+    saveContainer(containerId, name, config, 'running', inspect.Id);
+
+    res.json({ message: 'Container persisted successfully', db_id: containerId });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to persist container', details: error.message });
   }
 });
 
@@ -105,9 +232,6 @@ router.delete('/:id', async (req, res) => {
     await container.stop();
     await container.remove();
     
-    // Remove from DB
-    // To cleanly delete, we might want to find it by name or docker_id if we don't have db_id here.
-    const { getContainerByName, deleteContainer } = await import('../services/db.js');
     const dbContainer = getContainerByName(name);
     if (dbContainer) {
       deleteContainer(dbContainer.id);
@@ -125,15 +249,16 @@ router.delete('/:id', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const containers = await docker.listContainers({ all: true });
-    const { getContainerByName } = await import('../services/db.js');
     const enrichedContainers = await Promise.all(containers.map(async (c) => {
       try {
         const container = docker.getContainer(c.Id);
         const inspect = await container.inspect();
         const name = inspect.Name.replace(/^\//, '');
         const dbContainer = getContainerByName(name);
-        // If state is not running and there is an error in the last exit, or if it failed to start
-        return { ...c, StateDetails: inspect.State, isPersisted: !!dbContainer };
+        
+        let config = dbContainer ? dbContainer.config : null;
+
+        return { ...c, StateDetails: inspect.State, isPersisted: !!dbContainer, persistedConfig: config };
       } catch (e) {
         return c;
       }

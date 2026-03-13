@@ -10,6 +10,7 @@ export default function Home() {
   const [stats, setStats] = useState({});
   const [events, setEvents] = useState([]);
   const [expandedContainer, setExpandedContainer] = useState(null);
+  const [editingContainer, setEditingContainer] = useState(null);
   const eventScrollRef = useRef(null);
 
   const refreshData = async () => {
@@ -57,6 +58,30 @@ export default function Home() {
       eventScrollRef.current.scrollTop = 0;
     }
   }, [events]);
+
+  const handleEdit = (container) => {
+    setEditingContainer({
+      dockerId: container.Id,
+      ...container.persistedConfig
+    });
+  };
+
+  const handlePersist = async (container) => {
+    try {
+      const res = await fetch(`/api/proxy/containers/${container.Id}/persist`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        alert('Container successfully persisted to database.');
+        refreshData();
+      } else {
+        const err = await res.json();
+        alert('Failed to persist: ' + err.error);
+      }
+    } catch (e) {
+      alert('Failed to persist: ' + e.message);
+    }
+  };
 
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
   if (error) return <div style={{ padding: '20px', color: 'red' }}>Error: {error}</div>;
@@ -130,11 +155,22 @@ export default function Home() {
                 key={c.Id} container={c} stats={stats[c.Id]} 
                 isExpanded={expandedContainer === c.Id} 
                 onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)} 
+                onEdit={handleEdit}
+                onPersist={handlePersist}
               />
             ))}
           </tbody>
         </table>
       </section>
+
+      {editingContainer && (
+        <CreateContainer 
+          isOpenMode={true} 
+          initialData={editingContainer} 
+          onCreated={() => { setEditingContainer(null); refreshData(); }} 
+          onClose={() => setEditingContainer(null)} 
+        />
+      )}
     </div>
   );
 }

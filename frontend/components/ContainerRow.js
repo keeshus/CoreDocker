@@ -1,7 +1,7 @@
 import React from 'react';
 import ContainerLogs from './ContainerLogs';
 
-export default function ContainerRow({ container, stats, isExpanded, onToggle }) {
+export default function ContainerRow({ container, stats, isExpanded, onToggle, onEdit, onPersist }) {
   const calculateCPU = (cpuStats) => {
     if (!cpuStats || !cpuStats.cpu_usage || !cpuStats.precpu_usage) return '0.00%';
     const cpuDelta = cpuStats.cpu_usage.total_usage - cpuStats.precpu_usage.total_usage;
@@ -65,7 +65,26 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle })
           <td colSpan="6" style={{ padding: '15px', background: '#f8fafc' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px' }}>
               <div>
-                <h4 style={{ margin: '0 0 10px 0' }}>Details</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0 }}>Details</h4>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {container.isPersisted ? (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onEdit(container); }}
+                        style={{ padding: '4px 8px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onPersist(container); }}
+                        style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                      >
+                        Persist to DB
+                      </button>
+                    )}
+                  </div>
+                </div>
                 {(container.StateDetails?.Error || container.StateDetails?.Status === 'exited') && (
                   <div style={{ 
                     padding: '10px', background: '#fef2f2', border: '1px solid #fee2e2', 

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 
-export default function CreateContainer({ onCreated }) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function CreateContainer({ onCreated, initialData = null, onClose = null, isOpenMode = false }) {
+  const [isOpen, setIsOpen] = useState(isOpenMode);
   const [loading, setLoading] = useState(false);
   const [existingContainers, setExistingContainers] = useState([]);
   
-  const [formData, setFormData] = useState({
+  const defaultFormData = {
     name: '',
     image: '',
     restartPolicy: 'unless-stopped',
@@ -15,7 +15,32 @@ export default function CreateContainer({ onCreated }) {
     resources: { cpu: '', memory: '' },
     proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
     networkContainers: []
-  });
+  };
+
+  const [formData, setFormData] = useState(defaultFormData);
+
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        ...defaultFormData,
+        ...initialData,
+        env: initialData.env?.length ? initialData.env : [{ key: '', value: '' }],
+        volumes: initialData.volumes?.length ? initialData.volumes : [{ host: '', container: '' }],
+        ports: initialData.ports?.length ? initialData.ports : [{ host: '', container: '', ip: '0.0.0.0' }],
+        resources: initialData.resources || { cpu: '', memory: '' },
+        proxy: initialData.proxy || { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' }
+      });
+      setIsOpen(true);
+    } else {
+      setFormData(defaultFormData);
+    }
+  }, [initialData]);
+
+  useEffect(() => {
+    if (isOpenMode) {
+      setIsOpen(true);
+    }
+  }, [isOpenMode]);
 
   useEffect(() => {
     if (isOpen) {
@@ -39,6 +64,11 @@ export default function CreateContainer({ onCreated }) {
   const removeArrayItem = (field, index) => {
     const newArray = formData[field].filter((_, i) => i !== index);
     setFormData({ ...formData, [field]: newArray });
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
+    if (onClose) onClose();
   };
 
   const handleSubmit = async (e) => {
@@ -66,45 +96,51 @@ export default function CreateContainer({ onCreated }) {
     }
 
     try {
-      const res = await fetch('/api/proxy/containers', {
-        method: 'POST',
+      const url = initialData ? `/api/proxy/containers/${initialData.dockerId}` : '/api/proxy/containers';
+      const method = initialData ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      
       if (res.ok) {
-        setIsOpen(false);
+        handleClose();
         if (onCreated) onCreated();
       } else {
         const error = await res.json();
         alert('Error: ' + JSON.stringify(error));
       }
     } catch (err) {
-      alert('Error creating container: ' + err.message);
+      alert('Error saving container: ' + err.message);
     }
     setLoading(false);
   };
 
   return (
     <>
-      <button 
-        onClick={() => setIsOpen(true)}
-        style={{ padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
-      >
-        + Create Container
-      </button>
+      {!initialData && !isOpenMode && (
+        <button 
+          onClick={() => setIsOpen(true)}
+          style={{ padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          + Create Container
+        </button>
+      )}
 
       {isOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000 }}>
           <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '600px', background: 'white', overflowY: 'auto', padding: '20px', boxShadow: '-5px 0 15px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Create Container</h2>
-              <button onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.5em', cursor: 'pointer' }}>&times;</button>
+              <h2 style={{ margin: 0 }}>{initialData ? 'Edit Container' : 'Create Container'}</h2>
+              <button onClick={handleClose} style={{ background: 'none', border: 'none', fontSize: '1.5em', cursor: 'pointer' }}>&times;</button>
             </div>
 
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
               <div>
                 <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Name</label>
-                <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={{ width: '100%', padding: '8px' }} placeholder="my-app" />
+                <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={{ width: '100%', padding: '8px' }} placeholder="my-app" disabled={!!initialData} />
               </div>
 
               <div>
@@ -209,7 +245,7 @@ export default function CreateContainer({ onCreated }) {
                     {existingContainers.length === 0 ? <p style={{ margin: 0, fontSize: '0.9em' }}>No other containers found.</p> : existingContainers.map(c => {
                       const cName = c.Names[0].replace(/^\//, '');
                       // Skip self or proxy
-                      if (cName === 'core-proxy') return null;
+                      if (cName === 'core-proxy' || cName === formData.name) return null;
                       return (
                         <label key={c.Id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '0.9em' }}>
                           <input 
@@ -231,7 +267,7 @@ export default function CreateContainer({ onCreated }) {
               </details>
 
               <button type="submit" disabled={loading} style={{ padding: '15px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '1.1em', marginTop: '10px' }}>
-                {loading ? 'Creating (might be pulling image)...' : 'Create Container'}
+                {loading ? 'Saving (might be pulling image)...' : (initialData ? 'Save Changes' : 'Create Container')}
               </button>
             </form>
           </div>
