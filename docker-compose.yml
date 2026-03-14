@@ -1,5 +1,6 @@
 services:
   backend:
+    container_name: core-docker-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -7,11 +8,15 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./nginx/conf.d:/app/nginx/conf.d
       - ./nginx/ssl:/app/nginx/ssl
+    environment:
+      - SECRET_MANAGER_KEY=your_64_character_hex_string_here_edit_me
+      - ETCD_IMAGE=quay.io/coreos/etcd:latest
     ports:
       - "3001:3000"
     restart: always
 
   frontend:
+    container_name: core-docker-frontend
     build:
       context: .
       dockerfile: frontend/Dockerfile
@@ -23,7 +28,7 @@ services:
 
   nginx:
     image: nginx:latest
-    container_name: core-proxy
+    container_name: core-docker-proxy
     ports:
       - "80:80"
       - "443:443"

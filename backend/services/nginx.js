@@ -87,7 +87,7 @@ export async function removeRoute(containerName) {
 export async function reloadNginx() {
     try {
         const containers = await docker.listContainers({
-            filters: { name: ['^/core-proxy$'] }
+            filters: { name: ['^/core-docker-proxy$'] }
         });
         
         if (containers.length > 0) {

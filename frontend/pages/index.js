@@ -89,7 +89,11 @@ export default function Home() {
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1400px', margin: '0 auto' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ margin: 0 }}>Docker Manager</h1>
+        <h1 style={{ margin: 0, display: 'flex', gap: '20px', alignItems: 'center' }}>
+          Docker Manager
+          <a href="/nodes" style={{ fontSize: '0.6em', textDecoration: 'none', color: '#3b82f6', fontWeight: 'normal', background: '#eff6ff', padding: '4px 10px', borderRadius: '12px' }}>Cluster Nodes</a>
+          <a href="/secrets" style={{ fontSize: '0.6em', textDecoration: 'none', color: '#3b82f6', fontWeight: 'normal', background: '#eff6ff', padding: '4px 10px', borderRadius: '12px' }}>Secret Manager</a>
+        </h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           {info && (
             <div style={{ 
