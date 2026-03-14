@@ -35,9 +35,9 @@ const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resour
   };
 };
 
-const ensureNetworkConnections = async (name, containerId, networkContainers) => {
-  if (networkContainers && networkContainers.length > 0) {
-    const networkName = `net-${name}`;
+const ensureNetworkConnections = async (group, containerId) => {
+  if (group) {
+    const networkName = `group-${group}`;
     let network;
     try {
       network = docker.getNetwork(networkName);
@@ -47,23 +47,15 @@ const ensureNetworkConnections = async (name, containerId, networkContainers) =>
     }
     
     try { await network.connect({ Container: containerId }); } catch(e) {}
-    
-    for (const targetContainerId of networkContainers) {
-      try {
-        await network.connect({ Container: targetContainerId });
-      } catch (e) {
-        console.error(`Could not connect ${targetContainerId} to ${networkName}`, e);
-      }
-    }
   }
 };
 
 router.post('/', async (req, res) => {
   try {
-    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, networkContainers = [] } = req.body;
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '' } = req.body;
 
     const containerId = uuidv4();
-    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, networkContainers };
+    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group };
     
     // Save to DB first as intent
     await saveContainer(containerId, name, config, 'running');
@@ -87,7 +79,7 @@ router.post('/', async (req, res) => {
     await saveContainer(containerId, name, config, 'running', container.id);
 
     await container.start();
-    await ensureNetworkConnections(name, container.id, networkContainers);
+    await ensureNetworkConnections(group, container.id);
 
     if (proxy.enabled && proxy.uri && proxy.port) {
       await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
@@ -101,7 +93,7 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, networkContainers = [] } = req.body;
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '' } = req.body;
     
     // 1. Get the existing container and remove it
     let container = docker.getContainer(req.params.id);
@@ -118,7 +110,7 @@ router.put('/:id', async (req, res) => {
     await removeRoute(oldName);
 
     // 2. Update DB intent
-    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, networkContainers };
+    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group };
     const dbContainer = await getContainerByName(oldName);
     let dbId = dbContainer ? dbContainer.id : uuidv4();
     
@@ -149,7 +141,7 @@ router.put('/:id', async (req, res) => {
     await saveContainer(dbId, name, config, 'running', container.id);
 
     await container.start();
-    await ensureNetworkConnections(name, container.id, networkContainers);
+    await ensureNetworkConnections(group, container.id);
 
     if (proxy.enabled && proxy.uri && proxy.port) {
       await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
@@ -211,7 +203,7 @@ router.post('/:id/persist', async (req, res) => {
       restartPolicy: inspect.HostConfig.RestartPolicy.Name || 'unless-stopped',
       resources,
       proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
-      networkContainers: []
+      group: ''
     };
 
     const containerId = uuidv4();

@@ -61,8 +61,8 @@ export const reconcileContainers = async () => {
         try {
           container = await docker.createContainer(createOpts);
           
-          if (config.networkContainers && config.networkContainers.length > 0) {
-            const networkName = `net-${name}`;
+          if (config.group) {
+            const networkName = `group-${config.group}`;
             let network;
             try {
               network = docker.getNetwork(networkName);
@@ -71,13 +71,10 @@ export const reconcileContainers = async () => {
               network = await docker.createNetwork({ Name: networkName });
             }
             
-            await network.connect({ Container: container.id });
-            for (const targetContainerId of config.networkContainers) {
-              try {
-                await network.connect({ Container: targetContainerId });
-              } catch(e) {
-                console.log(`Could not connect ${targetContainerId} to ${networkName}`, e.message);
-              }
+            try {
+              await network.connect({ Container: container.id });
+            } catch(e) {
+              console.log(`Could not connect ${container.id} to ${networkName}`, e.message);
             }
           }
 

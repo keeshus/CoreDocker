@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 export default function CreateContainer({ onCreated, initialData = null, onClose = null, isOpenMode = false }) {
   const [isOpen, setIsOpen] = useState(isOpenMode);
   const [loading, setLoading] = useState(false);
-  const [existingContainers, setExistingContainers] = useState([]);
   
   const defaultFormData = {
     name: '',
@@ -14,7 +13,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     ports: [{ host: '', container: '', ip: '0.0.0.0' }],
     resources: { cpu: '', memory: '' },
     proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
-    networkContainers: []
+    group: ''
   };
 
   const [formData, setFormData] = useState(defaultFormData);
@@ -41,15 +40,6 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
       setIsOpen(true);
     }
   }, [isOpenMode]);
-
-  useEffect(() => {
-    if (isOpen) {
-      fetch('/api/proxy/containers')
-        .then(res => res.json())
-        .then(data => setExistingContainers(data))
-        .catch(console.error);
-    }
-  }, [isOpen]);
 
   const handleArrayChange = (field, index, key, value) => {
     const newArray = [...formData[field]];
@@ -238,31 +228,19 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
               </details>
 
               <details>
-                <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Network Grouping (Private Network)</summary>
-                <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none' }}>
-                  <p style={{ margin: '0 0 10px 0', fontSize: '0.9em', color: '#64748b' }}>Select other containers to link them securely with this container in an isolated network.</p>
-                  <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '10px' }}>
-                    {existingContainers.length === 0 ? <p style={{ margin: 0, fontSize: '0.9em' }}>No other containers found.</p> : existingContainers.map(c => {
-                      const cName = c.Names[0].replace(/^\//, '');
-                      // Skip self or proxy
-                      if (cName === 'core-proxy' || cName === formData.name) return null;
-                      return (
-                        <label key={c.Id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '0.9em' }}>
-                          <input 
-                            type="checkbox" 
-                            checked={formData.networkContainers.includes(c.Id)}
-                            onChange={(e) => {
-                              const newSelection = e.target.checked 
-                                ? [...formData.networkContainers, c.Id] 
-                                : formData.networkContainers.filter(id => id !== c.Id);
-                              setFormData({...formData, networkContainers: newSelection});
-                            }}
-                          />
-                          {cName} ({c.Image})
-                        </label>
-                      );
-                    })}
-                  </div>
+                <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Container Group & HA Configuration</summary>
+                <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <span style={{ fontWeight: 'bold', color: '#475569' }}>Group Name</span>
+                    <input 
+                      type="text" 
+                      value={formData.group || ''} 
+                      onChange={e => setFormData({...formData, group: e.target.value})} 
+                      placeholder="e.g. web-stack (Leave empty for no group)"
+                      style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                    />
+                    <small style={{ color: '#64748b' }}>Containers with the same group name are linked in an isolated network.</small>
+                  </label>
                 </div>
               </details>
 
