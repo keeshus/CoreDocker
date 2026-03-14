@@ -66,7 +66,7 @@ router.post('/', async (req, res) => {
     const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, networkContainers };
     
     // Save to DB first as intent
-    saveContainer(containerId, name, config, 'running');
+    await saveContainer(containerId, name, config, 'running');
 
     // Pull image if not exists
     try {
@@ -84,7 +84,7 @@ router.post('/', async (req, res) => {
     const container = await docker.createContainer(createOpts);
     
     // Update docker_id in DB
-    saveContainer(containerId, name, config, 'running', container.id);
+    await saveContainer(containerId, name, config, 'running', container.id);
 
     await container.start();
     await ensureNetworkConnections(name, container.id, networkContainers);
@@ -119,17 +119,17 @@ router.put('/:id', async (req, res) => {
 
     // 2. Update DB intent
     const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, networkContainers };
-    const dbContainer = getContainerByName(oldName);
+    const dbContainer = await getContainerByName(oldName);
     let dbId = dbContainer ? dbContainer.id : uuidv4();
     
     if (dbContainer && oldName !== name) {
       // Name changed, we might need to recreate the DB entry to avoid unique constraint issues if we just updated it, 
       // but ON CONFLICT(name) handles it. Actually better to delete old name and create new if name changes.
-      deleteContainer(dbContainer.id);
+      await deleteContainer(dbContainer.id);
       dbId = uuidv4();
     }
     
-    saveContainer(dbId, name, config, 'running');
+    await saveContainer(dbId, name, config, 'running');
 
     // Pull image if not exists
     try {
@@ -146,7 +146,7 @@ router.put('/:id', async (req, res) => {
     const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources);
     container = await docker.createContainer(createOpts);
     
-    saveContainer(dbId, name, config, 'running', container.id);
+    await saveContainer(dbId, name, config, 'running', container.id);
 
     await container.start();
     await ensureNetworkConnections(name, container.id, networkContainers);
@@ -167,7 +167,7 @@ router.post('/:id/persist', async (req, res) => {
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
 
-    const dbContainer = getContainerByName(name);
+    const dbContainer = await getContainerByName(name);
     if (dbContainer) {
       return res.status(400).json({ error: 'Container is already persisted' });
     }
@@ -215,7 +215,7 @@ router.post('/:id/persist', async (req, res) => {
     };
 
     const containerId = uuidv4();
-    saveContainer(containerId, name, config, 'running', inspect.Id);
+    await saveContainer(containerId, name, config, 'running', inspect.Id);
 
     res.json({ message: 'Container persisted successfully', db_id: containerId });
   } catch (error) {
@@ -232,9 +232,9 @@ router.delete('/:id', async (req, res) => {
     await container.stop();
     await container.remove();
     
-    const dbContainer = getContainerByName(name);
+    const dbContainer = await getContainerByName(name);
     if (dbContainer) {
-      deleteContainer(dbContainer.id);
+      await deleteContainer(dbContainer.id);
     }
 
     // Attempt to remove proxy route if it exists
@@ -254,7 +254,7 @@ router.get('/', async (req, res) => {
         const container = docker.getContainer(c.Id);
         const inspect = await container.inspect();
         const name = inspect.Name.replace(/^\//, '');
-        const dbContainer = getContainerByName(name);
+        const dbContainer = await getContainerByName(name);
         
         let config = dbContainer ? dbContainer.config : null;
 

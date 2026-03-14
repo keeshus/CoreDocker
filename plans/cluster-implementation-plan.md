@@ -36,6 +36,11 @@ graph TD
 
 ### 2.1 Cluster & ETCD Knowledge Base
 - **ETCD Implementation:** Each node runs an ETCD container. ETCD completely replaces SQLite for all cluster-wide configuration and container states. This ensures that if the current Master node fails, any other node can become the new Master and access the exact same state from its local ETCD member.
+- **ETCD Lifecycle & Management:**
+    - **Bootstrap:** When the first node is initialized, the Backend API spins up a standalone ETCD container. As new nodes are manually registered via the UI, the Backend API triggers a `member add` command on the existing cluster and provides the new node with the `initial-cluster` configuration string.
+    - **Configuration:** ETCD is configured with `--initial-cluster-state new` for the first node and `existing` for subsequent nodes. Peer communication occurs on a dedicated port (default 2380) over the Backhaul Network.
+    - **Health Monitoring:** The Backend API periodically monitors ETCD health via `/health` endpoints. If a local ETCD instance fails, the Reconciler attempts a container restart.
+    - **Quorum Awareness:** The UI will display a warning if the cluster size falls below quorum (e.g., 1 node up in a 3-node cluster).
 - **Backhaul Network:** A dedicated backhaul network (configurable via interface or IP range) will be used for all internal cluster traffic. This includes ETCD peer-to-peer communication, volume synchronization, and inter-node API heartbeats, ensuring isolation from public-facing application traffic.
 - **System Backups:** All critical system volumes (including ETCD data directories and Nginx configuration) will be marked as `backup` type. This ensures that the Restic scheduled job automatically includes the entire system's state in its backups.
 - **Master Node Identification:** The app will dynamically identify the "Master Node" by querying the ETCD cluster status. The node co-located with the current ETCD leader (identified via `etcdctl endpoint status` or the Maintenance API) will be responsible for hosting the cluster-wide configuration UI and managing the Shared IP pool.

@@ -1,77 +1,51 @@
-import Database from 'better-sqlite3';
+import { Etcd3 } from 'etcd3';
 import path from 'path';
-import fs from 'fs';
 
-// Using a volume path if available, or fallback to current dir
-const dbDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-const dbPath = process.env.DB_PATH || path.join(dbDir, 'core.db');
-const db = new Database(dbPath, { verbose: console.log });
+const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['127.0.0.1:2379'];
+const etcd = new Etcd3({ hosts: etcdHosts });
 
-// Initialize database schema
-db.exec(`
-  CREATE TABLE IF NOT EXISTS containers (
-    id TEXT PRIMARY KEY,
-    docker_id TEXT,
-    name TEXT UNIQUE,
-    config TEXT,
-    status TEXT
-  );
-`);
+const PREFIX = 'containers/';
 
-export const getContainers = () => {
-  const stmt = db.prepare('SELECT * FROM containers');
-  return stmt.all().map(c => ({
-    ...c,
-    config: JSON.parse(c.config)
-  }));
+export const getContainers = async () => {
+  const allContainers = await etcd.getAll().prefix(PREFIX).strings();
+  return Object.values(allContainers).map(c => JSON.parse(c));
 };
 
-export const getContainerById = (id) => {
-  const stmt = db.prepare('SELECT * FROM containers WHERE id = ?');
-  const c = stmt.get(id);
-  if (c) {
-    return { ...c, config: JSON.parse(c.config) };
+export const getContainerById = async (id) => {
+  const containers = await getContainers();
+  return containers.find(c => c.id === id) || null;
+};
+
+export const getContainerByName = async (name) => {
+  const containers = await getContainers();
+  return containers.find(c => c.name === name) || null;
+};
+
+export const saveContainer = async (id, name, config, status, docker_id = null) => {
+  const container = { id, name, config, status, docker_id };
+  await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(container));
+};
+
+export const updateContainerDockerId = async (id, docker_id) => {
+  const cString = await etcd.get(`${PREFIX}${id}`).string();
+  if (cString) {
+    const c = JSON.parse(cString);
+    c.docker_id = docker_id;
+    await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(c));
   }
-  return null;
 };
 
-export const getContainerByName = (name) => {
-  const stmt = db.prepare('SELECT * FROM containers WHERE name = ?');
-  const c = stmt.get(name);
-  if (c) {
-    return { ...c, config: JSON.parse(c.config) };
+export const updateContainerStatus = async (id, status) => {
+  const cString = await etcd.get(`${PREFIX}${id}`).string();
+  if (cString) {
+    const c = JSON.parse(cString);
+    c.status = status;
+    await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(c));
   }
-  return null;
 };
 
-export const saveContainer = (id, name, config, status, docker_id = null) => {
-  const stmt = db.prepare(`
-    INSERT INTO containers (id, name, config, status, docker_id)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(name) DO UPDATE SET
-      config = excluded.config,
-      status = excluded.status,
-      docker_id = excluded.docker_id
-  `);
-  stmt.run(id, name, JSON.stringify(config), status, docker_id);
+export const deleteContainer = async (id) => {
+  await etcd.delete().key(`${PREFIX}${id}`);
 };
 
-export const updateContainerDockerId = (id, docker_id) => {
-  const stmt = db.prepare('UPDATE containers SET docker_id = ? WHERE id = ?');
-  stmt.run(docker_id, id);
-};
-
-export const updateContainerStatus = (id, status) => {
-  const stmt = db.prepare('UPDATE containers SET status = ? WHERE id = ?');
-  stmt.run(status, id);
-};
-
-export const deleteContainer = (id) => {
-  const stmt = db.prepare('DELETE FROM containers WHERE id = ?');
-  stmt.run(id);
-};
-
-export default db;
+export default etcd;

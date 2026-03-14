@@ -4,7 +4,7 @@ import { addRoute } from './nginx.js';
 
 export const reconcileContainers = async () => {
   console.log('Starting container reconciliation...');
-  const savedContainers = getContainers();
+  const savedContainers = await getContainers();
 
   for (const saved of savedContainers) {
     if (saved.status !== 'running') continue;
@@ -93,7 +93,7 @@ export const reconcileContainers = async () => {
 
     try {
       const inspect = await container.inspect();
-      updateContainerDockerId(saved.id, inspect.Id);
+      await updateContainerDockerId(saved.id, inspect.Id);
 
       if (!inspect.State.Running) {
         console.log(`Starting container ${name}...`);

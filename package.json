@@ -9,8 +9,8 @@
     "frontend:start": "next start frontend"
   },
   "dependencies": {
-    "better-sqlite3": "latest",
     "dockerode": "latest",
+    "etcd3": "latest",
     "express": "latest",
     "next": "latest",
     "react": "latest",
