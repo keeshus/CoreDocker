@@ -13,7 +13,13 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     ports: [{ host: '', container: '', ip: '0.0.0.0' }],
     resources: { cpu: '', memory: '' },
     proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
-    group: ''
+    group: '',
+    ha: false,
+    tmpfs: '',
+    stopGracePeriod: '',
+    shmSize: '',
+    devices: '',
+    privileged: false
   };
 
   const [formData, setFormData] = useState(defaultFormData);
@@ -27,7 +33,13 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
         volumes: initialData.volumes?.length ? initialData.volumes : [{ host: '', container: '' }],
         ports: initialData.ports?.length ? initialData.ports : [{ host: '', container: '', ip: '0.0.0.0' }],
         resources: initialData.resources || { cpu: '', memory: '' },
-        proxy: initialData.proxy || { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' }
+        proxy: initialData.proxy || { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
+        ha: initialData.ha || false,
+        tmpfs: initialData.tmpfs || '',
+        stopGracePeriod: initialData.stopGracePeriod || '',
+        shmSize: initialData.shmSize || '',
+        devices: initialData.devices || '',
+        privileged: initialData.privileged || false
       });
       setIsOpen(true);
     } else {
@@ -241,6 +253,57 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                     />
                     <small style={{ color: '#64748b' }}>Containers with the same group name are linked in an isolated network.</small>
                   </label>
+                  
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.ha}
+                      onChange={e => setFormData({...formData, ha: e.target.checked})}
+                    />
+                    <span style={{ fontWeight: 'bold', color: '#475569' }}>High Availability (HA) Failover</span>
+                  </label>
+                  <small style={{ color: '#64748b', marginLeft: '25px' }}>If enabled, this container group will automatically fail over to a healthy node if its current host fails.</small>
+                </div>
+              </details>
+
+              <details>
+                <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Advanced Options</summary>
+                <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  
+                  <div>
+                    <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '0.9em' }}>Tmpfs Mounts</label>
+                    <input type="text" placeholder="e.g. /run,/tmp" value={formData.tmpfs} onChange={e => setFormData({...formData, tmpfs: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                    <small style={{ color: '#64748b' }}>Comma-separated container paths to mount as volatile memory-based filesystems.</small>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '0.9em' }}>Stop Grace Period (seconds)</label>
+                    <input type="number" placeholder="e.g. 30" value={formData.stopGracePeriod} onChange={e => setFormData({...formData, stopGracePeriod: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                    <small style={{ color: '#64748b' }}>Timeout for graceful container shutdown before forceful kill.</small>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '0.9em' }}>Shared Memory Size (shm_size)</label>
+                    <input type="text" placeholder="e.g. 64m or 1g" value={formData.shmSize} onChange={e => setFormData({...formData, shmSize: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                    <small style={{ color: '#64748b' }}>Size of /dev/shm. E.g. useful for specialized databases.</small>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '0.9em' }}>Device Pass-through</label>
+                    <input type="text" placeholder="e.g. /dev/dri:/dev/dri" value={formData.devices} onChange={e => setFormData({...formData, devices: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                    <small style={{ color: '#64748b' }}>Comma-separated list of host devices to pass to the container.</small>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.privileged}
+                      onChange={e => setFormData({...formData, privileged: e.target.checked})}
+                    />
+                    <span style={{ fontWeight: 'bold', color: '#475569', fontSize: '0.9em' }}>Privileged Mode</span>
+                  </label>
+                  <small style={{ color: '#64748b', marginLeft: '25px', marginTop: '-5px' }}>Run the container with full host access. Use with caution.</small>
+                  
                 </div>
               </details>
 

@@ -3,6 +3,8 @@ import ContainerRow from '../components/ContainerRow';
 import CreateContainer from '../components/CreateContainer';
 import NodesTab from '../components/NodesTab';
 import SecretsTab from '../components/SecretsTab';
+import TasksTab from '../components/TasksTab';
+import SettingsTab from '../components/SettingsTab';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('containers');
@@ -121,11 +123,17 @@ export default function Home() {
           >
             Cluster Nodes
           </button>
-          <button 
-            onClick={() => setActiveTab('secrets')} 
+          <button
+            onClick={() => setActiveTab('secrets')}
             style={{ background: activeTab === 'secrets' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'secrets' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
           >
             Secret Manager
+          </button>
+          <button
+            onClick={() => setActiveTab('tasks')}
+            style={{ background: activeTab === 'tasks' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'tasks' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Scheduler & Tasks
           </button>
         </div>
       </header>
@@ -202,6 +210,8 @@ export default function Home() {
       
       {activeTab === 'nodes' && <NodesTab />}
       {activeTab === 'secrets' && <SecretsTab />}
+      {activeTab === 'tasks' && <TasksTab />}
+      {activeTab === 'settings' && <SettingsTab />}
     </div>
   );
 }

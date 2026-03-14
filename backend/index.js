@@ -4,9 +4,12 @@ import infoRoutes from './routes/info.js';
 import eventRoutes from './routes/events.js';
 import nodeRoutes from './routes/nodes.js';
 import secretRoutes from './routes/secrets.js';
+import taskRoutes from './routes/tasks.js';
+import settingsRoutes from './routes/settings.js';
 import { reconcileContainers } from './services/reconciler.js';
 import { bootstrapEtcd } from './services/etcd-cluster.js';
 import { waitForEtcd } from './services/db.js';
+import { startScheduler } from './services/scheduler.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -19,6 +22,8 @@ app.use('/info', infoRoutes);
 app.use('/events', eventRoutes);
 app.use('/nodes', nodeRoutes);
 app.use('/secrets', secretRoutes);
+app.use('/tasks', taskRoutes);
+app.use('/settings', settingsRoutes);
 
 app.listen(port, async () => {
   console.log(`Backend running on port ${port}`);
@@ -26,6 +31,7 @@ app.listen(port, async () => {
     await bootstrapEtcd();
     await waitForEtcd();
     await reconcileContainers();
+    startScheduler();
   } catch (e) {
     console.error(`Startup failed: ${e.message}`);
     process.exit(1);

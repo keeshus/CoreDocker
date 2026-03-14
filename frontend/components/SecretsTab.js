@@ -53,73 +53,75 @@ export default function SecretsTab() {
   };
 
   return (
-    <div className="font-mono text-zinc-300">
-      <div className="bg-zinc-900 border border-zinc-800 rounded mb-8 p-6">
-        <h2 className="text-xl text-zinc-100 mb-4 flex items-center gap-2">
+    <section>
+      <div style={{ padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '30px' }}>
+        <h2 style={{ marginTop: 0, fontSize: '1.2em', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
           <Key size={20} /> Add New Secret
         </h2>
-        <form onSubmit={handleAddSecret} className="flex gap-4 items-end">
-          <div className="flex-1">
-            <label className="block text-xs uppercase text-zinc-500 mb-2 font-semibold">Secret Key</label>
+        <form onSubmit={handleAddSecret} style={{ display: 'flex', gap: '15px', alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Secret Key</label>
             <input
               type="text"
               value={newKey}
               onChange={e => setNewKey(e.target.value)}
               placeholder="e.g. CLOUDFLARE_API_KEY"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-100 focus:border-zinc-500 focus:outline-none transition-colors"
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
               required
             />
           </div>
-          <div className="flex-1">
-            <label className="block text-xs uppercase text-zinc-500 mb-2 font-semibold">Secret Value</label>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Secret Value</label>
             <input
               type="password"
               value={newValue}
               onChange={e => setNewValue(e.target.value)}
               placeholder="Enter secure value"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-100 focus:border-zinc-500 focus:outline-none transition-colors"
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
               required
             />
           </div>
           <button
             type="submit"
-            className="bg-zinc-100 text-zinc-950 hover:bg-white px-6 py-2 rounded flex items-center gap-2 font-bold transition-colors"
+            style={{
+              background: '#3b82f6', color: 'white', border: 'none', padding: '10px 20px',
+              borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px'
+            }}
           >
             <Plus size={18} /> Save Secret
           </button>
         </form>
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded overflow-hidden">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-zinc-950 border-b border-zinc-800">
-              <th className="p-4 text-xs uppercase text-zinc-500 font-semibold">Secret Key</th>
-              <th className="p-4 text-xs uppercase text-zinc-500 font-semibold text-right">Actions</th>
+      <h2 style={{ fontSize: '1.5em' }}>Secret Manager</h2>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
+            <th style={{ padding: '12px 10px' }}>Secret Key</th>
+            <th style={{ padding: '12px 10px', textAlign: 'right' }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <tr><td colSpan="2" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>Loading secrets...</td></tr>
+          ) : secrets.length === 0 ? (
+            <tr><td colSpan="2" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No secrets found.</td></tr>
+          ) : secrets.map(key => (
+            <tr key={key} style={{ borderBottom: '1px solid #f1f5f9' }}>
+              <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>{key}</td>
+              <td style={{ padding: '15px 10px', textAlign: 'right' }}>
+                <button
+                  onClick={() => handleDeleteSecret(key)}
+                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}
+                  title="Delete Secret"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan="2" className="p-8 text-center text-zinc-500">Loading secrets...</td></tr>
-            ) : secrets.length === 0 ? (
-              <tr><td colSpan="2" className="p-8 text-center text-zinc-500">No secrets found.</td></tr>
-            ) : secrets.map(key => (
-              <tr key={key} className="border-b border-zinc-800/50 hover:bg-zinc-800/20 transition-colors">
-                <td className="p-4 font-medium text-zinc-200">{key}</td>
-                <td className="p-4 text-right">
-                  <button
-                    onClick={() => handleDeleteSecret(key)}
-                    className="text-zinc-500 hover:text-red-400 transition-colors"
-                    title="Delete Secret"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }

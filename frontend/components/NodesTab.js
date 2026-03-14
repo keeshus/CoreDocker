@@ -53,81 +53,87 @@ export default function NodesTab() {
   };
 
   return (
-    <div className="font-mono text-zinc-300">
-      <div className="bg-zinc-900 border border-zinc-800 rounded mb-8 p-6">
-        <h2 className="text-xl text-zinc-100 mb-4 flex items-center gap-2">
+    <section>
+      <div style={{ padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '30px' }}>
+        <h2 style={{ marginTop: 0, fontSize: '1.2em', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
           <Settings size={20} /> Register New Node
         </h2>
-        <form onSubmit={handleAddNode} className="flex gap-4 items-end">
-          <div className="flex-1">
-            <label className="block text-xs uppercase text-zinc-500 mb-2 font-semibold">Node Name</label>
+        <form onSubmit={handleAddNode} style={{ display: 'flex', gap: '15px', alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Node Name</label>
             <input
               type="text"
               value={newNodeName}
               onChange={e => setNewNodeName(e.target.value)}
               placeholder="e.g. worker-01"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-100 focus:border-zinc-500 focus:outline-none transition-colors"
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
               required
             />
           </div>
-          <div className="flex-1">
-            <label className="block text-xs uppercase text-zinc-500 mb-2 font-semibold">IP Address</label>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>IP Address</label>
             <input
               type="text"
               value={newNodeIp}
               onChange={e => setNewNodeIp(e.target.value)}
               placeholder="e.g. 192.168.1.100"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-100 focus:border-zinc-500 focus:outline-none transition-colors"
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
               required
             />
           </div>
           <button
             type="submit"
-            className="bg-zinc-100 text-zinc-950 hover:bg-white px-6 py-2 rounded flex items-center gap-2 font-bold transition-colors"
+            style={{
+              background: '#3b82f6', color: 'white', border: 'none', padding: '10px 20px',
+              borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px'
+            }}
           >
             <Plus size={18} /> Add Node
           </button>
         </form>
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded overflow-hidden">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-zinc-950 border-b border-zinc-800">
-              <th className="p-4 text-xs uppercase text-zinc-500 font-semibold">Name</th>
-              <th className="p-4 text-xs uppercase text-zinc-500 font-semibold">IP Address</th>
-              <th className="p-4 text-xs uppercase text-zinc-500 font-semibold">Status</th>
-              <th className="p-4 text-xs uppercase text-zinc-500 font-semibold text-right">Actions</th>
+      <h2 style={{ fontSize: '1.5em' }}>Cluster Nodes</h2>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
+            <th style={{ padding: '12px 10px' }}>Name</th>
+            <th style={{ padding: '12px 10px' }}>IP Address</th>
+            <th style={{ padding: '12px 10px' }}>Status</th>
+            <th style={{ padding: '12px 10px', textAlign: 'right' }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <tr><td colSpan="4" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>Loading nodes...</td></tr>
+          ) : nodes.length === 0 ? (
+            <tr><td colSpan="4" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No nodes registered.</td></tr>
+          ) : nodes.map(node => (
+            <tr key={node.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+              <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>{node.name}</td>
+              <td style={{ padding: '15px 10px', color: '#64748b' }}>{node.ip}</td>
+              <td style={{ padding: '15px 10px' }}>
+                <span style={{
+                  display: 'inline-block', padding: '4px 8px', borderRadius: '12px', fontSize: '0.8em', fontWeight: 'bold',
+                  background: node.status === 'online' ? '#d1fae5' : '#fee2e2',
+                  color: node.status === 'online' ? '#059669' : '#dc2626'
+                }}>
+                  {node.status.toUpperCase()}
+                </span>
+              </td>
+              <td style={{ padding: '15px 10px', textAlign: 'right' }}>
+                <button
+                  onClick={() => handleDeleteNode(node.id)}
+                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}
+                  title="Remove Node"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan="4" className="p-8 text-center text-zinc-500">Loading nodes...</td></tr>
-            ) : nodes.length === 0 ? (
-              <tr><td colSpan="4" className="p-8 text-center text-zinc-500">No nodes registered.</td></tr>
-            ) : nodes.map(node => (
-              <tr key={node.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/20 transition-colors">
-                <td className="p-4 font-medium text-zinc-200">{node.name}</td>
-                <td className="p-4 text-zinc-400">{node.ip}</td>
-                <td className="p-4">
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${node.status === 'online' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                    {node.status}
-                  </span>
-                </td>
-                <td className="p-4 text-right">
-                  <button
-                    onClick={() => handleDeleteNode(node.id)}
-                    className="text-zinc-500 hover:text-red-400 transition-colors"
-                    title="Remove Node"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }

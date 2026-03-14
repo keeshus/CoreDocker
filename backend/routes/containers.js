@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
-const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resources) => {
+const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resources, opts = {}) => {
   const PortBindings = {};
   const ExposedPorts = {};
   (ports || []).forEach(p => {
@@ -19,7 +19,7 @@ const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resour
     });
   });
 
-  return {
+  const createOpts = {
     Image: image,
     name: name,
     Env: (env || []).map(e => `${e.key}=${e.value}`),
@@ -30,9 +30,47 @@ const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resour
       PortBindings,
       Memory: resources?.memory ? resources.memory * 1024 * 1024 : 0,
       NanoCPUs: resources?.cpu ? resources.cpu * 1000000000 : 0,
-      NetworkMode: 'web-proxy'
+      NetworkMode: 'web-proxy',
+      Privileged: opts.privileged || false,
     }
   };
+
+  if (opts.stopGracePeriod) {
+    createOpts.StopTimeout = parseInt(opts.stopGracePeriod, 10);
+  }
+
+  if (opts.tmpfs) {
+    const tmpfsObj = {};
+    opts.tmpfs.split(',').forEach(p => {
+      if (p.trim()) tmpfsObj[p.trim()] = '';
+    });
+    createOpts.HostConfig.Tmpfs = tmpfsObj;
+  }
+
+  if (opts.shmSize) {
+    // E.g. "64m" or "1g" or bytes
+    let bytes = 0;
+    const str = opts.shmSize.toLowerCase().trim();
+    if (str.endsWith('g')) bytes = parseInt(str) * 1024 * 1024 * 1024;
+    else if (str.endsWith('m')) bytes = parseInt(str) * 1024 * 1024;
+    else if (str.endsWith('k')) bytes = parseInt(str) * 1024;
+    else bytes = parseInt(str) || 0;
+    if (bytes > 0) createOpts.HostConfig.ShmSize = bytes;
+  }
+
+  if (opts.devices) {
+    createOpts.HostConfig.Devices = opts.devices.split(',').map(d => {
+      const [pathOnHost, pathInContainer, cgroupPermissions] = d.trim().split(':');
+      if (!pathOnHost) return null;
+      return {
+        PathOnHost: pathOnHost,
+        PathInContainer: pathInContainer || pathOnHost,
+        CgroupPermissions: cgroupPermissions || 'rwm'
+      };
+    }).filter(Boolean);
+  }
+
+  return createOpts;
 };
 
 const ensureNetworkConnections = async (group, containerId) => {
@@ -52,10 +90,10 @@ const ensureNetworkConnections = async (group, containerId) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '' } = req.body;
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
 
     const containerId = uuidv4();
-    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group };
+    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group, ha, tmpfs, stopGracePeriod, shmSize, devices, privileged };
     
     // Save to DB first as intent
     await saveContainer(containerId, name, config, 'running');
@@ -72,7 +110,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources);
+    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
     const container = await docker.createContainer(createOpts);
     
     // Update docker_id in DB
@@ -93,7 +131,7 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '' } = req.body;
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
     
     // 1. Get the existing container and remove it
     let container = docker.getContainer(req.params.id);
@@ -110,7 +148,7 @@ router.put('/:id', async (req, res) => {
     await removeRoute(oldName);
 
     // 2. Update DB intent
-    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group };
+    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group, ha, tmpfs, stopGracePeriod, shmSize, devices, privileged };
     const dbContainer = await getContainerByName(oldName);
     let dbId = dbContainer ? dbContainer.id : uuidv4();
     
@@ -135,7 +173,7 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources);
+    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
     container = await docker.createContainer(createOpts);
     
     await saveContainer(dbId, name, config, 'running', container.id);
