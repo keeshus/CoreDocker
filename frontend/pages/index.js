@@ -1,8 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import ContainerRow from '../components/ContainerRow';
 import CreateContainer from '../components/CreateContainer';
+import NodesTab from '../components/NodesTab';
+import SecretsTab from '../components/SecretsTab';
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState('containers');
   const [containers, setContainers] = useState([]);
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -53,7 +56,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    // Scroll to top when events change (newest is at top)
     if (eventScrollRef.current) {
       eventScrollRef.current.scrollTop = 0;
     }
@@ -88,93 +90,118 @@ export default function Home() {
 
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1400px', margin: '0 auto' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ margin: 0, display: 'flex', gap: '20px', alignItems: 'center' }}>
-          Docker Manager
-          <a href="/nodes" style={{ fontSize: '0.6em', textDecoration: 'none', color: '#3b82f6', fontWeight: 'normal', background: '#eff6ff', padding: '4px 10px', borderRadius: '12px' }}>Cluster Nodes</a>
-          <a href="/secrets" style={{ fontSize: '0.6em', textDecoration: 'none', color: '#3b82f6', fontWeight: 'normal', background: '#eff6ff', padding: '4px 10px', borderRadius: '12px' }}>Secret Manager</a>
-        </h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          {info && (
-            <div style={{ 
-              display: 'flex', gap: '20px', fontSize: '0.85em', background: '#f8fafc', 
-              padding: '8px 15px', borderRadius: '20px', border: '1px solid #e2e8f0', color: '#64748b' 
-            }}>
-              <span><strong>OS:</strong> {info.OperatingSystem}</span>
-              <span><strong>Kernel:</strong> {info.KernelVersion}</span>
-              <span><strong>Containers:</strong> {info.Containers} (Run: {info.ContainersRunning})</span>
-              <span><strong>CPUs:</strong> {info.NCPU}</span>
-            </div>
-          )}
-          <CreateContainer onCreated={refreshData} />
+      <header style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '30px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ margin: 0 }}>Docker Manager</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            {info && (
+              <div style={{ 
+                display: 'flex', gap: '20px', fontSize: '0.85em', background: '#f8fafc', 
+                padding: '8px 15px', borderRadius: '20px', border: '1px solid #e2e8f0', color: '#64748b' 
+              }}>
+                <span><strong>OS:</strong> {info.OperatingSystem}</span>
+                <span><strong>Kernel:</strong> {info.KernelVersion}</span>
+                <span><strong>Containers:</strong> {info.Containers} (Run: {info.ContainersRunning})</span>
+                <span><strong>CPUs:</strong> {info.NCPU}</span>
+              </div>
+            )}
+            <CreateContainer onCreated={refreshData} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+          <button 
+            onClick={() => setActiveTab('containers')} 
+            style={{ background: activeTab === 'containers' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'containers' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Containers
+          </button>
+          <button 
+            onClick={() => setActiveTab('nodes')} 
+            style={{ background: activeTab === 'nodes' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'nodes' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Cluster Nodes
+          </button>
+          <button 
+            onClick={() => setActiveTab('secrets')} 
+            style={{ background: activeTab === 'secrets' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'secrets' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Secret Manager
+          </button>
         </div>
       </header>
       
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '40px' }}>
-        <section style={{ padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <h2 style={{ marginTop: 0, fontSize: '1.2em', display: 'flex', justifyContent: 'space-between' }}>
-            Live Events 
-            <span style={{ fontSize: '0.6em', color: '#94a3b8', fontWeight: 'normal' }}>Showing last 20 events</span>
-          </h2>
-          <div 
-            ref={eventScrollRef}
-            style={{ maxHeight: '250px', overflowY: 'auto', fontSize: '0.85em', background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #f1f5f9' }}
-          >
-            {events.length === 0 ? <p style={{ color: '#94a3b8', margin: 0 }}>Waiting for events...</p> : (
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column-reverse' }}>
-                {events.map(e => (
-                  <li key={e.id} style={{ padding: '6px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: '#94a3b8', fontFamily: 'monospace', width: '100px' }}>[{e.time}]</span> 
-                    <span style={{ 
-                      display: 'inline-block', width: '80px', fontWeight: 'bold', textTransform: 'uppercase', 
-                      color: ['die', 'kill', 'stop'].includes(e.action) ? '#ef4444' : '#10b981'
-                    }}>
-                      {e.action}
-                    </span> 
-                    <span style={{ color: '#1e293b' }}>{e.name}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+      {activeTab === 'containers' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '40px' }}>
+            <section style={{ padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <h2 style={{ marginTop: 0, fontSize: '1.2em', display: 'flex', justifyContent: 'space-between' }}>
+                Live Events 
+                <span style={{ fontSize: '0.6em', color: '#94a3b8', fontWeight: 'normal' }}>Showing last 20 events</span>
+              </h2>
+              <div 
+                ref={eventScrollRef}
+                style={{ maxHeight: '250px', overflowY: 'auto', fontSize: '0.85em', background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #f1f5f9' }}
+              >
+                {events.length === 0 ? <p style={{ color: '#94a3b8', margin: 0 }}>Waiting for events...</p> : (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column-reverse' }}>
+                    {events.map(e => (
+                      <li key={e.id} style={{ padding: '6px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center' }}>
+                        <span style={{ color: '#94a3b8', fontFamily: 'monospace', width: '100px' }}>[{e.time}]</span> 
+                        <span style={{ 
+                          display: 'inline-block', width: '80px', fontWeight: 'bold', textTransform: 'uppercase', 
+                          color: ['die', 'kill', 'stop'].includes(e.action) ? '#ef4444' : '#10b981'
+                        }}>
+                          {e.action}
+                        </span> 
+                        <span style={{ color: '#1e293b' }}>{e.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
           </div>
-        </section>
-      </div>
 
-      <section>
-        <h2 style={{ fontSize: '1.5em' }}>Containers</h2>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
-              <th style={{ padding: '12px 10px' }}>Name</th>
-              <th style={{ padding: '12px 10px' }}>Image</th>
-              <th style={{ padding: '12px 10px' }}>State</th>
-              <th style={{ padding: '12px 10px' }}>CPU %</th>
-              <th style={{ padding: '12px 10px' }}>Memory</th>
-              <th style={{ padding: '12px 10px' }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {containers.map(c => (
-              <ContainerRow 
-                key={c.Id} container={c} stats={stats[c.Id]} 
-                isExpanded={expandedContainer === c.Id} 
-                onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)} 
-                onEdit={handleEdit}
-                onPersist={handlePersist}
-              />
-            ))}
-          </tbody>
-        </table>
-      </section>
+          <section>
+            <h2 style={{ fontSize: '1.5em' }}>Containers</h2>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
+                  <th style={{ padding: '12px 10px' }}>Name</th>
+                  <th style={{ padding: '12px 10px' }}>Image</th>
+                  <th style={{ padding: '12px 10px' }}>State</th>
+                  <th style={{ padding: '12px 10px' }}>CPU %</th>
+                  <th style={{ padding: '12px 10px' }}>Memory</th>
+                  <th style={{ padding: '12px 10px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {containers.map(c => (
+                  <ContainerRow 
+                    key={c.Id} container={c} stats={stats[c.Id]} 
+                    isExpanded={expandedContainer === c.Id} 
+                    onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)} 
+                    onEdit={handleEdit}
+                    onPersist={handlePersist}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </section>
 
-      {editingContainer && (
-        <CreateContainer 
-          isOpenMode={true} 
-          initialData={editingContainer} 
-          onCreated={() => { setEditingContainer(null); refreshData(); }} 
-          onClose={() => setEditingContainer(null)} 
-        />
+          {editingContainer && (
+            <CreateContainer 
+              isOpenMode={true} 
+              initialData={editingContainer} 
+              onCreated={() => { setEditingContainer(null); refreshData(); }} 
+              onClose={() => setEditingContainer(null)} 
+            />
+          )}
+        </>
       )}
+      
+      {activeTab === 'nodes' && <NodesTab />}
+      {activeTab === 'secrets' && <SecretsTab />}
     </div>
   );
 }

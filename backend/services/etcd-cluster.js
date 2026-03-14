@@ -1,7 +1,7 @@
 import docker from './docker.js';
 import { getNodes } from './db.js';
 
-const ETCD_IMAGE = process.env.ETCD_IMAGE || 'quay.io/coreos/etcd:latest';
+const ETCD_IMAGE = process.env.ETCD_IMAGE || 'gcr.io/etcd-development/etcd:v3.6.8';
 const CONTAINER_NAME = 'core-docker-etcd';
 
 export const bootstrapEtcd = async () => {
@@ -27,6 +27,15 @@ export const bootstrapEtcd = async () => {
         });
       }
 
+      // Determine the network name. If we are in a compose project, it might be prefixed.
+      // However, since we defined it with 'name: backhaul' in docker-compose.yml, it should be 'backhaul'.
+      // We'll try to find the network first.
+      const networks = await docker.listNetworks();
+      const targetNetwork = networks.find(n => n.Name === 'backhaul' || n.Name.endsWith('_backhaul'));
+      const networkName = targetNetwork ? targetNetwork.Name : 'backhaul';
+
+      console.log(`Using network: ${networkName}`);
+
       const createOpts = {
         Image: ETCD_IMAGE,
         name: CONTAINER_NAME,
@@ -34,16 +43,20 @@ export const bootstrapEtcd = async () => {
           'etcd',
           '--name', 'node-1',
           '--listen-client-urls', 'http://0.0.0.0:2379',
-          '--advertise-client-urls', 'http://127.0.0.1:2379',
+          '--advertise-client-urls', `http://${CONTAINER_NAME}:2379`,
           '--listen-peer-urls', 'http://0.0.0.0:2380',
-          '--initial-advertise-peer-urls', 'http://127.0.0.1:2380',
-          '--initial-cluster', 'node-1=http://127.0.0.1:2380',
+          '--initial-advertise-peer-urls', `http://${CONTAINER_NAME}:2380`,
+          '--initial-cluster', `node-1=http://${CONTAINER_NAME}:2380`,
           '--initial-cluster-token', 'core-docker-cluster',
           '--initial-cluster-state', 'new'
         ],
         HostConfig: {
-          NetworkMode: 'host',
           RestartPolicy: { Name: 'always' }
+        },
+        NetworkingConfig: {
+          EndpointsConfig: {
+            [networkName]: {}
+          }
         }
       };
 

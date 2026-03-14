@@ -6,6 +6,7 @@ import nodeRoutes from './routes/nodes.js';
 import secretRoutes from './routes/secrets.js';
 import { reconcileContainers } from './services/reconciler.js';
 import { bootstrapEtcd } from './services/etcd-cluster.js';
+import { waitForEtcd } from './services/db.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -21,6 +22,12 @@ app.use('/secrets', secretRoutes);
 
 app.listen(port, async () => {
   console.log(`Backend running on port ${port}`);
-  await bootstrapEtcd();
-  await reconcileContainers();
+  try {
+    await bootstrapEtcd();
+    await waitForEtcd();
+    await reconcileContainers();
+  } catch (e) {
+    console.error(`Startup failed: ${e.message}`);
+    process.exit(1);
+  }
 });

@@ -9,10 +9,10 @@ services:
       - ./nginx/conf.d:/app/nginx/conf.d
       - ./nginx/ssl:/app/nginx/ssl
     environment:
-      - SECRET_MANAGER_KEY=your_64_character_hex_string_here_edit_me
-      - ETCD_IMAGE=quay.io/coreos/etcd:latest
-    ports:
-      - "3001:3000"
+      - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
+      - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+    networks:
+      - backhaul
     restart: always
 
   frontend:
@@ -24,6 +24,8 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+    networks:
+      - backhaul
     restart: always
 
   nginx:
@@ -37,8 +39,11 @@ services:
       - ./nginx/ssl:/etc/nginx/ssl
     networks:
       - web-proxy
+      - backhaul
     restart: always
 
 networks:
   web-proxy:
     name: web-proxy
+  backhaul:
+    name: backhaul

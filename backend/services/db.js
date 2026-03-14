@@ -1,14 +1,38 @@
 import { Etcd3 } from 'etcd3';
 
-const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['127.0.0.1:2379'];
+const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379', '127.0.0.1:2379'];
 const etcd = new Etcd3({ hosts: etcdHosts });
+
+export const waitForEtcd = async (retries = 30, delay = 2000) => {
+  console.log(`Connecting to ETCD at ${etcdHosts}...`);
+  for (let i = 0; i < retries; i++) {
+    try {
+      // Simple operation to check connection
+      await etcd.put('connection-test').value(Date.now().toString());
+      console.log('Successfully connected to ETCD.');
+      return true;
+    } catch (e) {
+      console.error(`ETCD connection attempt ${i + 1} failed: ${e.message}`);
+      if (e.code === 'DEADLINE_EXCEEDED' || e.message.includes('DNS resolution failed')) {
+        console.error('Details: ETCD host might not be reachable or service is starting up.');
+      }
+      if (i === retries - 1) throw new Error(`Could not connect to ETCD after ${retries} attempts: ${e.message}`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+};
 
 const PREFIX = 'containers/';
 const NODE_PREFIX = 'nodes/';
 
 export const getNodes = async () => {
-  const allNodes = await etcd.getAll().prefix(NODE_PREFIX).strings();
-  return Object.values(allNodes).map(n => JSON.parse(n));
+  try {
+    const allNodes = await etcd.getAll().prefix(NODE_PREFIX).strings();
+    return Object.values(allNodes).map(n => JSON.parse(n));
+  } catch (e) {
+    console.error(`Failed to get nodes from ETCD: ${e.message}`);
+    throw e;
+  }
 };
 
 export const saveNode = async (id, name, ip, status = 'offline') => {
