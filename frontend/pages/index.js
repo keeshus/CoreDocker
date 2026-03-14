@@ -87,6 +87,24 @@ export default function Home() {
     }
   };
 
+  const handleDelete = async (container) => {
+    if (!window.confirm(`Are you sure you want to completely delete ${container.Names[0]}?`)) return;
+    try {
+      const res = await fetch(`/api/proxy/containers/${container.Id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        alert('Container deleted.');
+        refreshData();
+      } else {
+        const err = await res.json();
+        alert('Failed to delete: ' + err.error);
+      }
+    } catch (e) {
+      alert('Failed to delete: ' + e.message);
+    }
+  };
+
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
   if (error) return <div style={{ padding: '20px', color: 'red' }}>Error: {error}</div>;
 
@@ -194,9 +212,10 @@ export default function Home() {
                   <ContainerRow
                     key={c.Id} container={c} stats={stats[c.Id]}
                     isExpanded={expandedContainer === c.Id} 
-                    onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)} 
+                    onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)}
                     onEdit={handleEdit}
                     onPersist={handlePersist}
+                    onDelete={handleDelete}
                   />
                 ))}
               </tbody>

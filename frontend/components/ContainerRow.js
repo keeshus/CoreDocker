@@ -1,7 +1,7 @@
 import React from 'react';
 import ContainerLogs from './ContainerLogs';
 
-export default function ContainerRow({ container, stats, isExpanded, onToggle, onEdit, onPersist }) {
+export default function ContainerRow({ container, stats, isExpanded, onToggle, onEdit, onPersist, onDelete, isSystem = false }) {
   const calculateCPU = (cpuStats) => {
     if (!cpuStats || !cpuStats.cpu_usage || !cpuStats.precpu_usage) return '0.00%';
     const cpuDelta = cpuStats.cpu_usage.total_usage - cpuStats.precpu_usage.total_usage;
@@ -67,23 +67,33 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle, o
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                   <h4 style={{ margin: 0 }}>Details</h4>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    {container.isPersisted ? (
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); onEdit(container); }}
-                        style={{ padding: '4px 8px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
-                      >
-                        Edit
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onPersist(container); }}
-                        style={{ padding: '4px 8px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
-                      >
-                        Migrate to CoreDocker
-                      </button>
-                    )}
-                  </div>
+                  {!isSystem && (
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {container.isPersisted ? (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onEdit(container); }}
+                            style={{ padding: '4px 8px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(container); }}
+                            style={{ padding: '4px 8px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                          >
+                            Delete
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onPersist(container); }}
+                          style={{ padding: '4px 8px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                        >
+                          Migrate to CoreDocker
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {(container.StateDetails?.Error || container.StateDetails?.Status === 'exited') && (
                   <div style={{ 

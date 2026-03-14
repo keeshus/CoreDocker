@@ -110,6 +110,7 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
                   onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)}
                   onEdit={() => {}}
                   onPersist={() => {}}
+                  isSystem={true}
                 />
               ))}
             </tbody>
