@@ -1,5 +1,4 @@
 import { Etcd3 } from 'etcd3';
-import path from 'path';
 
 const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['127.0.0.1:2379'];
 const etcd = new Etcd3({ hosts: etcdHosts });
