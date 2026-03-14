@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, ip } = req.body;
+    const { name, ip, backupPath, nonBackupPath } = req.body;
     const id = uuidv4();
     
     // Attempt to add node to ETCD cluster first
@@ -27,8 +27,8 @@ router.post('/', async (req, res) => {
       // Proceeding with adding node to DB anyway for UI visibility, but status might be degraded
     }
 
-    await saveNode(id, name, ip, 'offline');
-    res.status(201).json({ id, name, ip, status: 'offline' });
+    await saveNode(id, name, ip, 'offline', backupPath, nonBackupPath);
+    res.status(201).json({ id, name, ip, status: 'offline', backupPath, nonBackupPath });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

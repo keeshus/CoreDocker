@@ -9,7 +9,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     image: '',
     restartPolicy: 'unless-stopped',
     env: [{ key: '', value: '' }],
-    volumes: [{ host: '', container: '' }],
+    volumes: [{ type: 'backup', host: '', container: '' }],
     ports: [{ host: '', container: '', ip: '0.0.0.0' }],
     resources: { cpu: '', memory: '' },
     proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
@@ -30,7 +30,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
         ...defaultFormData,
         ...initialData,
         env: initialData.env?.length ? initialData.env : [{ key: '', value: '' }],
-        volumes: initialData.volumes?.length ? initialData.volumes : [{ host: '', container: '' }],
+        volumes: initialData.volumes?.length ? initialData.volumes : [{ type: 'backup', host: '', container: '' }],
         ports: initialData.ports?.length ? initialData.ports : [{ host: '', container: '', ip: '0.0.0.0' }],
         resources: initialData.resources || { cpu: '', memory: '' },
         proxy: initialData.proxy || { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
@@ -81,7 +81,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     const payload = {
       ...formData,
       env: formData.env.filter(e => e.key && e.value),
-      volumes: formData.volumes.filter(v => v.host && v.container),
+      volumes: formData.volumes.filter(v => (v.type !== 'custom' || v.host) && v.container),
       ports: formData.ports.filter(p => p.container).map(p => ({
         ...p,
         host: p.host ? parseInt(p.host, 10) : null,
@@ -200,13 +200,36 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                 <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Volumes</summary>
                 <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none' }}>
                   {formData.volumes.map((v, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                      <input type="text" placeholder="Host path" value={v.host} onChange={ev => handleArrayChange('volumes', i, 'host', ev.target.value)} style={{ flex: 1, padding: '8px' }} />
-                      <input type="text" placeholder="Container path" value={v.container} onChange={ev => handleArrayChange('volumes', i, 'container', ev.target.value)} style={{ flex: 1, padding: '8px' }} />
-                      <button type="button" onClick={() => removeArrayItem('volumes', i)}>X</button>
+                    <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
+                      <select
+                        value={v.type || 'custom'}
+                        onChange={ev => handleArrayChange('volumes', i, 'type', ev.target.value)}
+                        style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                      >
+                        <option value="backup">Backup</option>
+                        <option value="non-backup">Non-Backup</option>
+                        <option value="custom">Custom Path</option>
+                      </select>
+                      
+                      <input
+                        type="text"
+                        placeholder={v.type === 'custom' ? "Host absolute path" : "Folder name (optional)"}
+                        value={v.host}
+                        onChange={ev => handleArrayChange('volumes', i, 'host', ev.target.value)}
+                        style={{ flex: 1, padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Container path (e.g. /app/data)"
+                        value={v.container}
+                        onChange={ev => handleArrayChange('volumes', i, 'container', ev.target.value)}
+                        style={{ flex: 1, padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                        required
+                      />
+                      <button type="button" onClick={() => removeArrayItem('volumes', i)} style={{ padding: '8px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>X</button>
                     </div>
                   ))}
-                  <button type="button" onClick={() => addArrayItem('volumes', {host: '', container: ''})}>+ Add Volume</button>
+                  <button type="button" onClick={() => addArrayItem('volumes', {type: 'backup', host: '', container: ''})} style={{ padding: '8px 12px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>+ Add Volume</button>
                 </div>
               </details>
 

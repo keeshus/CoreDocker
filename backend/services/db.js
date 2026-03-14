@@ -1,4 +1,5 @@
 import { Etcd3 } from 'etcd3';
+import os from 'os';
 
 const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379', '127.0.0.1:2379'];
 const etcd = new Etcd3({ hosts: etcdHosts });
@@ -35,13 +36,29 @@ export const getNodes = async () => {
   }
 };
 
-export const saveNode = async (id, name, ip, status = 'offline') => {
-  const node = { id, name, ip, status };
+export const saveNode = async (id, name, ip, status = 'offline', backupPath = '/data/backup', nonBackupPath = '/data/non-backup') => {
+  const node = { id, name, ip, status, backupPath, nonBackupPath };
   await etcd.put(`${NODE_PREFIX}${id}`).value(JSON.stringify(node));
 };
 
 export const deleteNode = async (id) => {
   await etcd.delete().key(`${NODE_PREFIX}${id}`);
+};
+
+export const getLocalNodeConfig = async () => {
+  const nodes = await getNodes();
+  const interfaces = os.networkInterfaces();
+  const localIps = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (!iface.internal && iface.family === 'IPv4') {
+        localIps.push(iface.address);
+      }
+    }
+  }
+
+  const localNode = nodes.find(n => localIps.includes(n.ip));
+  return localNode || { backupPath: '/data/backup', nonBackupPath: '/data/non-backup' };
 };
 
 export const getContainers = async () => {

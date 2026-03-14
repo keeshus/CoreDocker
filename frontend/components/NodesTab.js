@@ -5,6 +5,8 @@ export default function NodesTab() {
   const [nodes, setNodes] = useState([]);
   const [newNodeName, setNewNodeName] = useState('');
   const [newNodeIp, setNewNodeIp] = useState('');
+  const [newBackupPath, setNewBackupPath] = useState('/data/backup');
+  const [newNonBackupPath, setNewNonBackupPath] = useState('/data/non-backup');
   const [loading, setLoading] = useState(true);
 
   const fetchNodes = async () => {
@@ -31,11 +33,13 @@ export default function NodesTab() {
       const res = await fetch('/api/proxy/nodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newNodeName, ip: newNodeIp }),
+        body: JSON.stringify({ name: newNodeName, ip: newNodeIp, backupPath: newBackupPath, nonBackupPath: newNonBackupPath }),
       });
       if (res.ok) {
         setNewNodeName('');
         setNewNodeIp('');
+        setNewBackupPath('/data/backup');
+        setNewNonBackupPath('/data/non-backup');
         fetchNodes();
       }
     } catch (e) {
@@ -58,8 +62,8 @@ export default function NodesTab() {
         <h2 style={{ marginTop: 0, fontSize: '1.2em', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
           <Settings size={20} /> Register New Node
         </h2>
-        <form onSubmit={handleAddNode} style={{ display: 'flex', gap: '15px', alignItems: 'flex-end' }}>
-          <div style={{ flex: 1 }}>
+        <form onSubmit={handleAddNode} style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', alignItems: 'flex-end' }}>
+          <div style={{ flex: '1 1 200px' }}>
             <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Node Name</label>
             <input
               type="text"
@@ -70,13 +74,35 @@ export default function NodesTab() {
               required
             />
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: '1 1 200px' }}>
             <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>IP Address</label>
             <input
               type="text"
               value={newNodeIp}
               onChange={e => setNewNodeIp(e.target.value)}
               placeholder="e.g. 192.168.1.100"
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+              required
+            />
+          </div>
+          <div style={{ flex: '1 1 200px' }}>
+            <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Backup Path</label>
+            <input
+              type="text"
+              value={newBackupPath}
+              onChange={e => setNewBackupPath(e.target.value)}
+              placeholder="/data/backup"
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+              required
+            />
+          </div>
+          <div style={{ flex: '1 1 200px' }}>
+            <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Non-Backup Path</label>
+            <input
+              type="text"
+              value={newNonBackupPath}
+              onChange={e => setNewNonBackupPath(e.target.value)}
+              placeholder="/data/non-backup"
               style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
               required
             />
@@ -100,14 +126,15 @@ export default function NodesTab() {
             <th style={{ padding: '12px 10px' }}>Name</th>
             <th style={{ padding: '12px 10px' }}>IP Address</th>
             <th style={{ padding: '12px 10px' }}>Status</th>
+            <th style={{ padding: '12px 10px' }}>Paths (Backup / Non-Backup)</th>
             <th style={{ padding: '12px 10px', textAlign: 'right' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {loading ? (
-            <tr><td colSpan="4" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>Loading nodes...</td></tr>
+            <tr><td colSpan="5" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>Loading nodes...</td></tr>
           ) : nodes.length === 0 ? (
-            <tr><td colSpan="4" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No nodes registered.</td></tr>
+            <tr><td colSpan="5" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No nodes registered.</td></tr>
           ) : nodes.map(node => (
             <tr key={node.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
               <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>{node.name}</td>
@@ -120,6 +147,10 @@ export default function NodesTab() {
                 }}>
                   {node.status.toUpperCase()}
                 </span>
+              </td>
+              <td style={{ padding: '15px 10px', fontSize: '0.85em', color: '#64748b' }}>
+                <div><strong>B:</strong> {node.backupPath || '/data/backup'}</div>
+                <div><strong>NB:</strong> {node.nonBackupPath || '/data/non-backup'}</div>
               </td>
               <td style={{ padding: '15px 10px', textAlign: 'right' }}>
                 <button

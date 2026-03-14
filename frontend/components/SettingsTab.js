@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import ContainerRow from './ContainerRow';
 
-export default function SettingsTab() {
+export default function SettingsTab({ systemContainers = [], stats = {} }) {
   const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '' });
+  const [expandedContainer, setExpandedContainer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -81,6 +83,41 @@ export default function SettingsTab() {
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
       </form>
+
+      <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
+        <h3 style={{ marginTop: 0 }}>System Containers</h3>
+        <p style={{ color: '#64748b', fontSize: '0.9em' }}>Monitor core application containers here.</p>
+        
+        {systemContainers.length > 0 ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '15px' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
+                <th style={{ padding: '12px 10px' }}>Name</th>
+                <th style={{ padding: '12px 10px' }}>Image</th>
+                <th style={{ padding: '12px 10px' }}>State</th>
+                <th style={{ padding: '12px 10px' }}>CPU %</th>
+                <th style={{ padding: '12px 10px' }}>Memory</th>
+                <th style={{ padding: '12px 10px' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {systemContainers.map(c => (
+                <ContainerRow
+                  key={c.Id}
+                  container={c}
+                  stats={stats[c.Id]}
+                  isExpanded={expandedContainer === c.Id}
+                  onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)}
+                  onEdit={() => {}}
+                  onPersist={() => {}}
+                />
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p style={{ color: '#94a3b8' }}>No system containers found.</p>
+        )}
+      </div>
     </div>
   );
 }

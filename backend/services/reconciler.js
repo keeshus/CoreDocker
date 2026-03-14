@@ -1,5 +1,5 @@
 import docker from './docker.js';
-import { getContainers, updateContainerDockerId } from './db.js';
+import { getContainers, updateContainerDockerId, getLocalNodeConfig } from './db.js';
 import { addRoute } from './nginx.js';
 
 export const reconcileContainers = async () => {
@@ -43,6 +43,18 @@ export const reconcileContainers = async () => {
           });
         });
 
+        const localNode = await getLocalNodeConfig();
+        const binds = (config.volumes || []).map(v => {
+          let hostPath = v.host;
+          if (v.type === 'backup' || v.type === 'non-backup') {
+            const basePath = v.type === 'backup' ? localNode.backupPath : localNode.nonBackupPath;
+            const folderName = v.host ? `/${v.host}` : '';
+            const safeContainerPath = v.container.replace(/^\//, '').replace(/\//g, '_');
+            hostPath = `${basePath}/${name}${folderName ? folderName : '/' + safeContainerPath}`;
+          }
+          return `${hostPath}:${v.container}`;
+        });
+
         const createOpts = {
           Image: config.image,
           name: name,
@@ -50,7 +62,7 @@ export const reconcileContainers = async () => {
           ExposedPorts,
           HostConfig: {
             RestartPolicy: { Name: config.restartPolicy || 'unless-stopped' },
-            Binds: (config.volumes || []).map(v => `${v.host}:${v.container}`),
+            Binds: binds,
             PortBindings,
             Memory: config.resources?.memory ? config.resources.memory * 1024 * 1024 : 0,
             NanoCPUs: config.resources?.cpu ? config.resources.cpu * 1000000000 : 0,

@@ -76,11 +76,11 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle, o
                         Edit
                       </button>
                     ) : (
-                      <button 
+                      <button
                         onClick={(e) => { e.stopPropagation(); onPersist(container); }}
-                        style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                        style={{ padding: '4px 8px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
                       >
-                        Persist to DB
+                        Migrate to CoreDocker
                       </button>
                     )}
                   </div>

@@ -10,6 +10,7 @@ import { reconcileContainers } from './services/reconciler.js';
 import { bootstrapEtcd } from './services/etcd-cluster.js';
 import { waitForEtcd } from './services/db.js';
 import { startScheduler } from './services/scheduler.js';
+import docker from './services/docker.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -24,6 +25,31 @@ app.use('/nodes', nodeRoutes);
 app.use('/secrets', secretRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/settings', settingsRoutes);
+
+const stopSystemContainers = async () => {
+  console.log('Stopping system containers...');
+  try {
+    const containers = await docker.listContainers();
+    for (const c of containers) {
+      if (c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend') {
+        console.log(`Stopping ${c.Names[0]}...`);
+        try { await docker.getContainer(c.Id).stop(); } catch(e) {}
+      }
+    }
+  } catch (e) {
+    console.error('Error stopping system containers:', e.message);
+  }
+};
+
+process.on('SIGTERM', async () => {
+  await stopSystemContainers();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  await stopSystemContainers();
+  process.exit(0);
+});
 
 app.listen(port, async () => {
   console.log(`Backend running on port ${port}`);

@@ -1,12 +1,15 @@
 import express from 'express';
 import docker from '../services/docker.js';
 import { addRoute, removeRoute } from '../services/nginx.js';
-import { saveContainer, deleteContainer, getContainerByName } from '../services/db.js';
+import { exec } from 'child_process';
+import util from 'util';
+const execAsync = util.promisify(exec);
+import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig } from '../services/db.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
-const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resources, opts = {}) => {
+const buildCreateOpts = async (name, image, env, volumes, ports, restartPolicy, resources, opts = {}) => {
   const PortBindings = {};
   const ExposedPorts = {};
   (ports || []).forEach(p => {
@@ -19,6 +22,19 @@ const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resour
     });
   });
 
+  const localNode = await getLocalNodeConfig();
+  
+  const binds = (volumes || []).map(v => {
+    let hostPath = v.host;
+    if (v.type === 'backup' || v.type === 'non-backup') {
+      const basePath = v.type === 'backup' ? localNode.backupPath : localNode.nonBackupPath;
+      const folderName = v.host ? `/${v.host}` : '';
+      const safeContainerPath = v.container.replace(/^\//, '').replace(/\//g, '_');
+      hostPath = `${basePath}/${name}${folderName ? folderName : '/' + safeContainerPath}`;
+    }
+    return `${hostPath}:${v.container}`;
+  });
+
   const createOpts = {
     Image: image,
     name: name,
@@ -26,7 +42,7 @@ const buildCreateOpts = (name, image, env, volumes, ports, restartPolicy, resour
     ExposedPorts,
     HostConfig: {
       RestartPolicy: { Name: restartPolicy },
-      Binds: (volumes || []).map(v => `${v.host}:${v.container}`),
+      Binds: binds,
       PortBindings,
       Memory: resources?.memory ? resources.memory * 1024 * 1024 : 0,
       NanoCPUs: resources?.cpu ? resources.cpu * 1000000000 : 0,
@@ -110,7 +126,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
+    const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
     const container = await docker.createContainer(createOpts);
     
     // Update docker_id in DB
@@ -173,7 +189,7 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    const createOpts = buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
+    const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
     container = await docker.createContainer(createOpts);
     
     await saveContainer(dbId, name, config, 'running', container.id);
@@ -209,10 +225,52 @@ router.post('/:id/persist', async (req, res) => {
       return { key: e.substring(0, idx), value: e.substring(idx + 1) };
     });
 
-    const volumes = (inspect.HostConfig.Binds || []).map(b => {
-      const parts = b.split(':');
-      return { host: parts[0], container: parts[1] };
-    });
+    const localNode = await getLocalNodeConfig();
+    const volumes = [];
+    
+    // Process Binds
+    if (inspect.HostConfig.Binds) {
+      for (const b of inspect.HostConfig.Binds) {
+        const parts = b.split(':');
+        const oldHost = parts[0];
+        const containerPath = parts[1];
+        
+        // Auto-migrate to backup path
+        const folderName = containerPath.replace(/^\//, '').replace(/\//g, '_');
+        const newHostPath = `${localNode.backupPath}/${name}/${folderName}`;
+        
+        console.log(`Migrating volume ${oldHost} -> ${newHostPath}`);
+        try {
+          await execAsync(`mkdir -p "${newHostPath}" && cp -R "${oldHost}"/* "${newHostPath}"/ || true`);
+        } catch(e) {
+          console.error(`Error copying volume ${oldHost}:`, e);
+        }
+        
+        volumes.push({ type: 'backup', host: folderName, container: containerPath });
+      }
+    }
+    
+    // Process Mounts (Docker named volumes)
+    if (inspect.Mounts) {
+      for (const m of inspect.Mounts) {
+        if (m.Type === 'volume' && m.Source) {
+          const folderName = m.Destination.replace(/^\//, '').replace(/\//g, '_');
+          const newHostPath = `${localNode.backupPath}/${name}/${folderName}`;
+          
+          console.log(`Migrating docker volume ${m.Source} -> ${newHostPath}`);
+          try {
+            await execAsync(`mkdir -p "${newHostPath}" && cp -R "${m.Source}"/* "${newHostPath}"/ || true`);
+          } catch(e) {
+            console.error(`Error copying volume ${m.Source}:`, e);
+          }
+          
+          // Only add if not already in volumes
+          if (!volumes.find(v => v.container === m.Destination)) {
+            volumes.push({ type: 'backup', host: folderName, container: m.Destination });
+          }
+        }
+      }
+    }
 
     const ports = [];
     if (inspect.NetworkSettings.Ports) {
@@ -241,13 +299,29 @@ router.post('/:id/persist', async (req, res) => {
       restartPolicy: inspect.HostConfig.RestartPolicy.Name || 'unless-stopped',
       resources,
       proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
-      group: ''
+      group: '',
+      ha: false,
+      tmpfs: '',
+      stopGracePeriod: '',
+      shmSize: '',
+      devices: '',
+      privileged: false
     };
 
-    const containerId = uuidv4();
-    await saveContainer(containerId, name, config, 'running', inspect.Id);
+    // Stop and remove old container
+    await container.stop();
+    await container.remove();
 
-    res.json({ message: 'Container persisted successfully', db_id: containerId });
+    const containerId = uuidv4();
+    await saveContainer(containerId, name, config, 'running');
+
+    // Create and start new container via CoreDocker configuration
+    const createOpts = await buildCreateOpts(name, config.image, env, volumes, ports, config.restartPolicy, resources, config);
+    const newContainer = await docker.createContainer(createOpts);
+    await saveContainer(containerId, name, config, 'running', newContainer.id);
+    await newContainer.start();
+
+    res.json({ message: 'Container migrated successfully', db_id: containerId });
   } catch (error) {
     res.status(500).json({ error: 'Failed to persist container', details: error.message });
   }

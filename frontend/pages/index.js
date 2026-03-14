@@ -76,14 +76,14 @@ export default function Home() {
         method: 'POST'
       });
       if (res.ok) {
-        alert('Container successfully persisted to database.');
+        alert('Container successfully migrated to CoreDocker.');
         refreshData();
       } else {
         const err = await res.json();
-        alert('Failed to persist: ' + err.error);
+        alert('Failed to migrate: ' + err.error);
       }
     } catch (e) {
-      alert('Failed to persist: ' + e.message);
+      alert('Failed to migrate: ' + e.message);
     }
   };
 
@@ -135,6 +135,12 @@ export default function Home() {
           >
             Scheduler & Tasks
           </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            style={{ background: activeTab === 'settings' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'settings' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Master Settings
+          </button>
         </div>
       </header>
       
@@ -184,9 +190,9 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {containers.map(c => (
-                  <ContainerRow 
-                    key={c.Id} container={c} stats={stats[c.Id]} 
+                {containers.filter(c => !c.Names[0].startsWith('/core-docker-')).map(c => (
+                  <ContainerRow
+                    key={c.Id} container={c} stats={stats[c.Id]}
                     isExpanded={expandedContainer === c.Id} 
                     onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)} 
                     onEdit={handleEdit}
@@ -211,7 +217,7 @@ export default function Home() {
       {activeTab === 'nodes' && <NodesTab />}
       {activeTab === 'secrets' && <SecretsTab />}
       {activeTab === 'tasks' && <TasksTab />}
-      {activeTab === 'settings' && <SettingsTab />}
+      {activeTab === 'settings' && <SettingsTab systemContainers={containers.filter(c => c.Names[0].startsWith('/core-docker-'))} stats={stats} />}
     </div>
   );
 }
