@@ -10,6 +10,7 @@ import { reconcileContainers } from './services/reconciler.js';
 import { bootstrapEtcd } from './services/etcd-cluster.js';
 import { waitForEtcd } from './services/db.js';
 import { startScheduler } from './services/scheduler.js';
+import { startOrchestrator } from './services/orchestrator.js';
 import docker from './services/docker.js';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
@@ -78,7 +79,8 @@ app.listen(port, async () => {
     await waitForEtcd();
     await registerLocalNode(nodeId, nodeName, nodeIp);
     await reconcileContainers(nodeId);
-    startScheduler(nodeId);
+    startScheduler();
+    startOrchestrator(nodeId);
   } catch (e) {
     console.error(`Startup failed: ${e.message}`);
     process.exit(1);

@@ -98,7 +98,7 @@ const reconcileCoreDNS = async () => {
         path /skydns
         endpoint ${process.env.ETCD_HOSTS || 'http://core-docker-etcd:2379'}
     }
-    forward . 8.8.8.8 8.8.4.4
+    forward . 192.168.1.1
     log
     errors
 }
