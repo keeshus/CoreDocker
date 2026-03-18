@@ -1,0 +1,131 @@
+services:
+  # --- NODE 1 ---
+  dind-node1:
+    image: docker:dind
+    privileged: true
+    container_name: core-docker-dind-node1
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.10
+      web-proxy:
+    environment:
+      - DOCKER_TLS_CERTDIR=
+
+  backend-node1:
+    container_name: core-docker-backend-node1
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    environment:
+      - DOCKER_HOST=tcp://dind-node1:2375
+      - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
+      - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+    depends_on:
+      - dind-node1
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.11
+    restart: always
+
+  frontend-node1:
+    container_name: core-docker-frontend-node1
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend-node1
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.12
+    restart: always
+
+  proxy-node1:
+    image: nginx:latest
+    container_name: core-docker-proxy-node1
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - frontend-node1
+      - backend-node1
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.13
+    restart: always
+
+  # --- NODE 2 ---
+  dind-node2:
+    image: docker:dind
+    privileged: true
+    container_name: core-docker-dind-node2
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.20
+      web-proxy:
+    environment:
+      - DOCKER_TLS_CERTDIR=
+
+  backend-node2:
+    container_name: core-docker-backend-node2
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    environment:
+      - DOCKER_HOST=tcp://dind-node2:2375
+      - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
+      - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+    depends_on:
+      - dind-node2
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.21
+    restart: always
+
+  frontend-node2:
+    container_name: core-docker-frontend-node2
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend-node2
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.22
+    restart: always
+
+  proxy-node2:
+    image: nginx:latest
+    container_name: core-docker-proxy-node2
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - frontend-node2
+      - backend-node2
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.23
+    restart: always
+
+networks:
+  backhaul:
+    name: backhaul
+    ipam:
+      config:
+        - subnet: 10.0.0.0/24
+  web-proxy:
+    name: web-proxy

@@ -107,7 +107,21 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle, o
                 )}
                 <p style={{ fontSize: '0.9em' }}><strong>ID:</strong> {container.Id.substring(0, 12)}</p>
                 <p style={{ fontSize: '0.9em' }}><strong>Created:</strong> {new Date(container.Created * 1000).toLocaleString()}</p>
-                <p style={{ fontSize: '0.9em' }}><strong>Exit Code:</strong> {container.StateDetails?.ExitCode ?? '-'}</p>
+                <div style={{ fontSize: '0.9em', marginTop: '10px', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>
+                  <strong>Exit Code:</strong> {container.StateDetails?.ExitCode ?? '-'}
+                  {container.StateDetails?.ExitCode !== 0 && container.StateDetails?.ExitCode !== undefined && (
+                    <div style={{ fontSize: '0.85em', color: '#991b1b', marginTop: '5px' }}>
+                      {container.StateDetails?.ExitCode === 1 && '⚠ 1: Generic error / Application failure'}
+                      {container.StateDetails?.ExitCode === 126 && '✖ 126: Command invoked cannot execute'}
+                      {container.StateDetails?.ExitCode === 127 && '✖ 127: Command not found'}
+                      {container.StateDetails?.ExitCode === 130 && '⏹ 130: Container terminated by Ctrl+C'}
+                      {container.StateDetails?.ExitCode === 137 && '⏹ 137: Container received SIGKILL (e.g. OOM or forced stop)'}
+                      {container.StateDetails?.ExitCode === 139 && '✖ 139: Segmentation fault'}
+                      {container.StateDetails?.ExitCode === 143 && '⏹ 143: Container received SIGTERM (graceful stop)'}
+                      {![1, 126, 127, 130, 137, 139, 143].includes(container.StateDetails.ExitCode) && 'ℹ Non-zero exit code: check logs for details.'}
+                    </div>
+                  )}
+                </div>
                 <h4 style={{ margin: '15px 0 10px 0' }}>Network</h4>
                 {container.NetworkSettings.Networks && Object.keys(container.NetworkSettings.Networks).map(net => (
                   <p key={net} style={{ fontSize: '0.9em' }}>
