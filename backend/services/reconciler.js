@@ -101,16 +101,8 @@ const reconcileCoreDNS = async (localNodeId) => {
   try {
     const containerName = 'core-docker-coredns';
     let container;
-    try {
-      container = docker.getContainer(containerName);
-      await container.inspect();
-    } catch (e) {
-      if (e.statusCode === 404) {
-        console.log('[Reconciler] Creating CoreDNS container...');
-        const image = 'coredns/coredns:latest';
-        await ensureImage(image);
-
-        const corefile = `
+    
+    const corefile = `
 .:53 {
     etcd {
         path /skydns
@@ -121,29 +113,51 @@ const reconcileCoreDNS = async (localNodeId) => {
     errors
 }
 `;
-        // In Cluster/DinD simulation (detected by presence of NODE_ID), we skip PortBindings 
-        // to avoid conflicting on the host's port 53. 
-        // In production (no NODE_ID, or running on separate hosts), we map it.
+
+    // Always ensure the config directory and file exist on the host
+    const fs = require('fs');
+    const path = require('path');
+    const configDir = path.resolve(process.cwd(), 'coredns');
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    fs.writeFileSync(path.join(configDir, 'Corefile'), corefile);
+
+    try {
+      container = docker.getContainer(containerName);
+      await container.inspect();
+    } catch (e) {
+      if (e.statusCode === 404) {
+        console.log('[Reconciler] Creating CoreDNS container...');
+        const image = 'coredns/coredns:latest';
+        await ensureImage(image);
+
+        // Detect if we are in local development/simulation vs production
         const isClusterSim = !!process.env.NODE_ID;
-        const PortBindings = isClusterSim ? {} : { '53/udp': [{ HostPort: '53' }], '53/tcp': [{ HostPort: '53' }] };
+        const dnsHostPort = isClusterSim ? (5300 + parseInt(localNodeId.replace(/\D/g, '') || 0)) : 5353;
+        
+        // If the user wants port 53 in production, we check an env var or assume lack of NODE_ID
+        const finalPort = process.env.DNS_PRODUCTION === 'true' ? '53' : dnsHostPort.toString();
+
+        console.log(`[Reconciler] CoreDNS binding to host port ${finalPort}`);
 
         container = await docker.createContainer({
           Image: image,
           name: containerName,
           Cmd: ['-conf', '/etc/coredns/Corefile'],
           HostConfig: {
-            Binds: [],
-            PortBindings: PortBindings,
+            Binds: [`${configDir}:/etc/coredns`],
+            PortBindings: {
+              '53/udp': [{ HostPort: finalPort }],
+              '53/tcp': [{ HostPort: finalPort }]
+            },
             RestartPolicy: { Name: 'always' },
             NetworkMode: 'backhaul'
           }
         });
         
         await container.start();
-        await container.exec({
-          Cmd: ['sh', '-c', `mkdir -p /etc/coredns && echo "${corefile.replace(/"/g, '\\"')}" > /etc/coredns/Corefile`],
-        }).then(exec => exec.start());
-        await container.restart();
+        console.log('[Reconciler] CoreDNS started with volume-mounted Corefile');
       }
     }
 

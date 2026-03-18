@@ -67,6 +67,7 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       - frontend-node1
+      - backend-node1
     networks:
       backhaul:
         ipv4_address: 10.0.0.13

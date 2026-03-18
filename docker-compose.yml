@@ -11,6 +11,8 @@ services:
     environment:
       - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
       - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+      # Set this to true in production hosts where port 53 is free
+      - DNS_PRODUCTION=false
     networks:
       - backhaul
     restart: always
