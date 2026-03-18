@@ -48,17 +48,21 @@ app.use('/tasks', taskRoutes);
 app.use('/settings', settingsRoutes);
 
 const stopSystemContainers = async () => {
-  console.log('Stopping system containers...');
+  console.log('Stopping and removing system containers...');
   try {
-    const containers = await docker.listContainers();
+    const containers = await docker.listContainers({ all: true });
     for (const c of containers) {
-      if (c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend') {
-        console.log(`Stopping ${c.Names[0]}...`);
-        try { await docker.getContainer(c.Id).stop(); } catch(e) {}
+      if (c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend' && c.Names[0] !== '/core-docker-etcd') {
+        console.log(`Cleaning up ${c.Names[0]}...`);
+        try {
+          const container = docker.getContainer(c.Id);
+          await container.stop();
+          await container.remove();
+        } catch(e) {}
       }
     }
   } catch (e) {
-    console.error('Error stopping system containers:', e.message);
+    console.error('Error cleaning up system containers:', e.message);
   }
 };
 

@@ -5,6 +5,20 @@ import etcd from './db.js';
 
 const SETTINGS_KEY = 'cluster/settings';
 
+const ensureImage = async (image) => {
+  try {
+    await docker.getImage(image).inspect();
+  } catch (e) {
+    console.log(`[Reconciler] Pulling image ${image}...`);
+    await new Promise((resolve, reject) => {
+      docker.pull(image, (err, stream) => {
+        if (err) return reject(err);
+        docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
+      });
+    });
+  }
+};
+
 const reconcileDNSVIP = async (localNodeId) => {
   try {
     const settingsStr = await etcd.get(SETTINGS_KEY).string();
@@ -18,7 +32,6 @@ const reconcileDNSVIP = async (localNodeId) => {
 
     const containerName = 'core-docker-keepalived-dns';
 
-    // Only run on top 3 nodes
     if (nodeIndex === -1 || nodeIndex >= 3) {
       try {
         const existing = docker.getContainer(containerName);
@@ -53,8 +66,9 @@ vrrp_instance VI_DNS {
     } catch (e) {
       if (e.statusCode === 404) {
         console.log('[Reconciler] Creating Keepalived DNS VIP container...');
+        await ensureImage('alpine:latest');
         container = await docker.createContainer({
-          Image: 'alpine:latest', // We will install keepalived via entrypoint or use a custom image
+          Image: 'alpine:latest',
           name: containerName,
           Entrypoint: ['sh', '-c', 'apk add --no-cache keepalived && keepalived --dont-fork --log-console'],
           HostConfig: {
@@ -79,10 +93,11 @@ vrrp_instance VI_DNS {
 
   } catch (err) {
     console.error('[Reconciler] DNS VIP reconcile failed:', err.message);
+    throw err; 
   }
 };
 
-const reconcileCoreDNS = async () => {
+const reconcileCoreDNS = async (localNodeId) => {
   try {
     const containerName = 'core-docker-coredns';
     let container;
@@ -92,6 +107,9 @@ const reconcileCoreDNS = async () => {
     } catch (e) {
       if (e.statusCode === 404) {
         console.log('[Reconciler] Creating CoreDNS container...');
+        const image = 'coredns/coredns:latest';
+        await ensureImage(image);
+
         const corefile = `
 .:53 {
     etcd {
@@ -103,20 +121,24 @@ const reconcileCoreDNS = async () => {
     errors
 }
 `;
+        // In Cluster/DinD simulation (detected by presence of NODE_ID), we skip PortBindings 
+        // to avoid conflicting on the host's port 53. 
+        // In production (no NODE_ID, or running on separate hosts), we map it.
+        const isClusterSim = !!process.env.NODE_ID;
+        const PortBindings = isClusterSim ? {} : { '53/udp': [{ HostPort: '53' }], '53/tcp': [{ HostPort: '53' }] };
+
         container = await docker.createContainer({
-          Image: 'coredns/coredns:latest',
+          Image: image,
           name: containerName,
           Cmd: ['-conf', '/etc/coredns/Corefile'],
           HostConfig: {
-            // In a real setup we'd use a proper mount, using sh to create it for this demo
             Binds: [],
-            PortBindings: { '53/udp': [{ HostPort: '53' }], '53/tcp': [{ HostPort: '53' }] },
+            PortBindings: PortBindings,
             RestartPolicy: { Name: 'always' },
             NetworkMode: 'backhaul'
           }
         });
         
-        // Start it once so we can exec the config in
         await container.start();
         await container.exec({
           Cmd: ['sh', '-c', `mkdir -p /etc/coredns && echo "${corefile.replace(/"/g, '\\"')}" > /etc/coredns/Corefile`],
@@ -131,19 +153,20 @@ const reconcileCoreDNS = async () => {
     }
   } catch (err) {
     console.error('[Reconciler] CoreDNS reconcile failed:', err.message);
+    throw err;
   }
 };
 
 export const reconcileContainers = async (localNodeId) => {
   console.log(`[Reconciler] Starting reconciliation for Node ${localNodeId}...`);
   
-  await reconcileCoreDNS();
+  await reconcileCoreDNS(localNodeId);
   await reconcileDNSVIP(localNodeId);
 
   const savedContainers = await getContainers();
 
   for (const saved of savedContainers) {
-    if (saved.current_node !== localNodeId) {
+    if (saved.current_node && saved.current_node !== localNodeId) {
       try {
         const localC = docker.getContainer(saved.name);
         const inspect = await localC.inspect();
@@ -167,16 +190,7 @@ export const reconcileContainers = async (localNodeId) => {
     } catch (e) {
       if (e.statusCode === 404) {
         console.log(`[Reconciler] Container ${name} missing on this host, creating...`);
-        try {
-          await docker.getImage(config.image).inspect();
-        } catch (imageErr) {
-          await new Promise((resolve, reject) => {
-            docker.pull(config.image, (err, stream) => {
-              if (err) return reject(err);
-              docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
-            });
-          });
-        }
+        await ensureImage(config.image);
 
         const PortBindings = {};
         const ExposedPorts = {};
