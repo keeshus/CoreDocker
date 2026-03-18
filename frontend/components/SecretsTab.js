@@ -9,7 +9,7 @@ export default function SecretsTab() {
 
   const fetchSecrets = async () => {
     try {
-      const res = await fetch('/api/proxy/secrets');
+      const res = await fetch('/api/secrets');
       const data = await res.json();
       setSecrets(data);
     } catch (e) {
@@ -28,7 +28,7 @@ export default function SecretsTab() {
     if (!newKey || !newValue) return;
     
     try {
-      const res = await fetch('/api/proxy/secrets', {
+      const res = await fetch('/api/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: newKey, value: newValue }),
@@ -45,7 +45,7 @@ export default function SecretsTab() {
 
   const handleDeleteSecret = async (key) => {
     try {
-      const res = await fetch(`/api/proxy/secrets/${key}`, { method: 'DELETE' });
+      const res = await fetch(`/api/secrets/${key}`, { method: 'DELETE' });
       if (res.ok) fetchSecrets();
     } catch (e) {
       console.error(e);

@@ -6,7 +6,7 @@ export default function TasksTab() {
 
   const fetchTasks = async () => {
     try {
-      const res = await fetch('/api/proxy/tasks');
+      const res = await fetch('/api/tasks');
       if (res.ok) {
         const data = await res.json();
         setTasks(data);
@@ -26,7 +26,7 @@ export default function TasksTab() {
 
   const toggleTask = async (taskId, enabled) => {
     try {
-      await fetch(`/api/proxy/tasks/${taskId}/toggle`, {
+      await fetch(`/api/tasks/${taskId}/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
@@ -39,7 +39,7 @@ export default function TasksTab() {
 
   const triggerTask = async (taskId) => {
     try {
-      await fetch(`/api/proxy/tasks/${taskId}/trigger`, {
+      await fetch(`/api/tasks/${taskId}/trigger`, {
         method: 'POST'
       });
       fetchTasks();

@@ -21,8 +21,8 @@ export default function Home() {
   const refreshData = async () => {
     try {
       const [containersRes, infoRes] = await Promise.all([
-        fetch('/api/proxy/containers'),
-        fetch('/api/proxy/info')
+        fetch('/api/containers'),
+        fetch('/api/info')
       ]);
       if (containersRes.ok) setContainers(await containersRes.json());
       if (infoRes.ok) setInfo(await infoRes.json());
@@ -34,7 +34,7 @@ export default function Home() {
   useEffect(() => {
     refreshData().finally(() => setLoading(false));
 
-    const eventSource = new EventSource('/api/proxy/events');
+    const eventSource = new EventSource('/api/events');
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -72,7 +72,7 @@ export default function Home() {
 
   const handlePersist = async (container) => {
     try {
-      const res = await fetch(`/api/proxy/containers/${container.Id}/persist`, {
+      const res = await fetch(`/api/containers/${container.Id}/persist`, {
         method: 'POST'
       });
       if (res.ok) {
@@ -90,7 +90,7 @@ export default function Home() {
   const handleDelete = async (container) => {
     if (!window.confirm(`Are you sure you want to completely delete ${container.Names[0]}?`)) return;
     try {
-      const res = await fetch(`/api/proxy/containers/${container.Id}`, {
+      const res = await fetch(`/api/containers/${container.Id}`, {
         method: 'DELETE'
       });
       if (res.ok) {

@@ -5,7 +5,7 @@ export default function ContainerLogs({ containerId }) {
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    const eventSource = new EventSource(`/api/proxy/containers/${containerId}/logs`);
+    const eventSource = new EventSource(`/api/containers/${containerId}/logs`);
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);

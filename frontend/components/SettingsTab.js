@@ -8,7 +8,7 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/proxy/settings')
+    fetch('/api/settings')
       .then(res => res.json())
       .then(data => {
         if (data && typeof data === 'object') {
@@ -26,7 +26,7 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch('/api/proxy/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)

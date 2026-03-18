@@ -11,7 +11,7 @@ export default function NodesTab() {
 
   const fetchNodes = async () => {
     try {
-      const res = await fetch('/api/proxy/nodes');
+      const res = await fetch('/api/nodes');
       const data = await res.json();
       setNodes(data);
     } catch (e) {
@@ -30,7 +30,7 @@ export default function NodesTab() {
     if (!newNodeName || !newNodeIp) return;
     
     try {
-      const res = await fetch('/api/proxy/nodes', {
+      const res = await fetch('/api/nodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newNodeName, ip: newNodeIp, backupPath: newBackupPath, nonBackupPath: newNonBackupPath }),
@@ -49,7 +49,7 @@ export default function NodesTab() {
 
   const handleDeleteNode = async (id) => {
     try {
-      const res = await fetch(`/api/proxy/nodes/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/nodes/${id}`, { method: 'DELETE' });
       if (res.ok) fetchNodes();
     } catch (e) {
       console.error(e);

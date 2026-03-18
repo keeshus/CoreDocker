@@ -98,7 +98,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     }
 
     try {
-      const url = initialData ? `/api/proxy/containers/${initialData.dockerId}` : '/api/proxy/containers';
+      const url = initialData ? `/api/containers/${initialData.dockerId}` : '/api/containers';
       const method = initialData ? 'PUT' : 'POST';
 
       const res = await fetch(url, {
