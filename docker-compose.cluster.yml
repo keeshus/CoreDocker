@@ -1,4 +1,20 @@
 services:
+  # --- SHARED INFRA ---
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.6.8
+    container_name: core-docker-etcd
+    command:
+      - etcd
+      - --name=node-1
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --initial-cluster-token=core-docker-cluster
+      - --initial-cluster-state=new
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.5
+    restart: always
+
   # --- NODE 1 ---
   dind-node1:
     image: docker:dind
@@ -19,9 +35,12 @@ services:
     environment:
       - DOCKER_HOST=tcp://dind-node1:2375
       - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
-      - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+      - ETCD_HOSTS=http://etcd:2379
+      - NODE_ID=node-1
+      - NODE_NAME=node-1
     depends_on:
       - dind-node1
+      - etcd
     networks:
       backhaul:
         ipv4_address: 10.0.0.11
@@ -48,25 +67,9 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       - frontend-node1
-      - backend-node1
     networks:
       backhaul:
         ipv4_address: 10.0.0.13
-    restart: always
-
-  keepalived-node1:
-    build:
-      context: .
-      dockerfile: keepalived/Dockerfile
-    container_name: core-docker-keepalived-node1
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
-    volumes:
-      - ./keepalived/node1.conf:/etc/keepalived/keepalived.conf
-    networks:
-      backhaul:
-        ipv4_address: 10.0.0.14
     restart: always
 
   # --- NODE 2 ---
@@ -89,9 +92,12 @@ services:
     environment:
       - DOCKER_HOST=tcp://dind-node2:2375
       - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
-      - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+      - ETCD_HOSTS=http://etcd:2379
+      - NODE_ID=node-2
+      - NODE_NAME=node-2
     depends_on:
       - dind-node2
+      - etcd
     networks:
       backhaul:
         ipv4_address: 10.0.0.21
@@ -118,25 +124,9 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       - frontend-node2
-      - backend-node2
     networks:
       backhaul:
         ipv4_address: 10.0.0.23
-    restart: always
-
-  keepalived-node2:
-    build:
-      context: .
-      dockerfile: keepalived/Dockerfile
-    container_name: core-docker-keepalived-node2
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
-    volumes:
-      - ./keepalived/node2.conf:/etc/keepalived/keepalived.conf
-    networks:
-      backhaul:
-        ipv4_address: 10.0.0.24
     restart: always
 
   # --- NODE 3 ---
@@ -159,9 +149,12 @@ services:
     environment:
       - DOCKER_HOST=tcp://dind-node3:2375
       - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
-      - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+      - ETCD_HOSTS=http://etcd:2379
+      - NODE_ID=node-3
+      - NODE_NAME=node-3
     depends_on:
       - dind-node3
+      - etcd
     networks:
       backhaul:
         ipv4_address: 10.0.0.31
@@ -188,25 +181,9 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       - frontend-node3
-      - backend-node3
     networks:
       backhaul:
         ipv4_address: 10.0.0.33
-    restart: always
-
-  keepalived-node3:
-    build:
-      context: .
-      dockerfile: keepalived/Dockerfile
-    container_name: core-docker-keepalived-node3
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
-    volumes:
-      - ./keepalived/node3.conf:/etc/keepalived/keepalived.conf
-    networks:
-      backhaul:
-        ipv4_address: 10.0.0.34
     restart: always
 
 networks:

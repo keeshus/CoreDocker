@@ -8,7 +8,11 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const nodes = await getNodes();
-    res.json(nodes);
+    // Return all nodes, including those from heartbeats. 
+    // Filter out potential duplicates or offline nodes based on lastSeen if needed.
+    const now = Date.now();
+    const activeNodes = nodes.filter(n => (now - (n.lastSeen || 0)) < 30000);
+    res.json(activeNodes);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

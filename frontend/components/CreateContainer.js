@@ -15,6 +15,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
     group: '',
     ha: false,
+    ha_allowed_nodes: [],
     tmpfs: '',
     stopGracePeriod: '',
     shmSize: '',
@@ -326,6 +327,29 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                     <span style={{ fontWeight: 'bold', color: '#475569', fontSize: '0.9em' }}>Privileged Mode</span>
                   </label>
                   <small style={{ color: '#64748b', marginLeft: '25px', marginTop: '-5px' }}>Run the container with full host access. Use with caution.</small>
+
+                  <div style={{ marginTop: '15px', borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        checked={formData.ha}
+                        onChange={e => setFormData({...formData, ha: e.target.checked})}
+                      />
+                      <span style={{ fontWeight: 'bold', color: '#475569', fontSize: '0.9em' }}>Enable High Availability (ETCD-DNS)</span>
+                    </label>
+                    {formData.ha && (
+                      <div style={{ marginTop: '10px', marginLeft: '25px' }}>
+                        <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '0.85em' }}>Allowed Nodes (comma separated ID's, empty = any)</label>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. node-1,node-2" 
+                          value={formData.ha_allowed_nodes.join(',')} 
+                          onChange={e => setFormData({...formData, ha_allowed_nodes: e.target.value.split(',').map(s => s.trim()).filter(Boolean)})} 
+                          style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                        />
+                      </div>
+                    )}
+                  </div>
                   
                 </div>
               </details>

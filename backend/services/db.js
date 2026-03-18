@@ -26,6 +26,24 @@ export const waitForEtcd = async (retries = 30, delay = 2000) => {
 const PREFIX = 'containers/';
 const NODE_PREFIX = 'nodes/';
 
+let nodeLease = null;
+
+export const registerLocalNode = async (nodeId, name, ip) => {
+  if (nodeLease) {
+    try { await nodeLease.revoke(); } catch (e) {}
+  }
+  
+  nodeLease = etcd.lease(10); // 10 second TTL
+  nodeLease.on('lost', () => {
+    console.error('Node lease lost, re-registering...');
+    registerLocalNode(nodeId, name, ip);
+  });
+
+  const node = { id: nodeId, name, ip, status: 'online', lastSeen: Date.now() };
+  await nodeLease.put(`${NODE_PREFIX}${nodeId}`).value(JSON.stringify(node));
+  console.log(`Node ${nodeId} registered with lease.`);
+};
+
 export const getNodes = async () => {
   try {
     const allNodes = await etcd.getAll().prefix(NODE_PREFIX).strings();
@@ -76,8 +94,8 @@ export const getContainerByName = async (name) => {
   return containers.find(c => c.name === name) || null;
 };
 
-export const saveContainer = async (id, name, config, status, docker_id = null) => {
-  const container = { id, name, config, status, docker_id };
+export const saveContainer = async (id, name, config, status, docker_id = null, current_node = null) => {
+  const container = { id, name, config, status, docker_id, current_node };
   await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(container));
 };
 

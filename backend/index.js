@@ -11,9 +11,29 @@ import { bootstrapEtcd } from './services/etcd-cluster.js';
 import { waitForEtcd } from './services/db.js';
 import { startScheduler } from './services/scheduler.js';
 import docker from './services/docker.js';
+import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
+import { registerLocalNode } from './services/db.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+const nodeId = process.env.NODE_ID || uuidv4();
+const nodeName = process.env.NODE_NAME || os.hostname();
+
+const getLocalIp = () => {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (!iface.internal && iface.family === 'IPv4') {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+};
+
+const nodeIp = getLocalIp();
 
 app.use(express.json());
 
@@ -52,12 +72,13 @@ process.on('SIGINT', async () => {
 });
 
 app.listen(port, async () => {
-  console.log(`Backend running on port ${port}`);
+  console.log(`Backend running on port ${port} (Node: ${nodeName}, ID: ${nodeId}, IP: ${nodeIp})`);
   try {
     await bootstrapEtcd();
     await waitForEtcd();
-    await reconcileContainers();
-    startScheduler();
+    await registerLocalNode(nodeId, nodeName, nodeIp);
+    await reconcileContainers(nodeId);
+    startScheduler(nodeId);
   } catch (e) {
     console.error(`Startup failed: ${e.message}`);
     process.exit(1);

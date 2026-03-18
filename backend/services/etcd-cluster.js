@@ -5,6 +5,11 @@ const ETCD_IMAGE = process.env.ETCD_IMAGE || 'gcr.io/etcd-development/etcd:v3.6.
 const CONTAINER_NAME = 'core-docker-etcd';
 
 export const bootstrapEtcd = async () => {
+  // Check if we are running in the main compose or cluster compose
+  if (process.env.NODE_ID) {
+    console.log(`[ETCD] Node ${process.env.NODE_ID} skipping individual bootstrap, assuming cluster ETCD is available.`);
+    return;
+  }
   try {
     const container = docker.getContainer(CONTAINER_NAME);
     const info = await container.inspect();

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ContainerRow from './ContainerRow';
 
 export default function SettingsTab({ systemContainers = [], stats = {} }) {
-  const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '' });
+  const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '', dnsVip: '' });
   const [expandedContainer, setExpandedContainer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,6 +73,18 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
             style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
           />
           <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Dedicated network for internal cluster traffic (ETCD, Sync).</small>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Shared DNS VIP Address</label>
+          <input 
+            type="text" 
+            value={settings.dnsVip} 
+            onChange={e => setSettings({...settings, dnsVip: e.target.value})}
+            placeholder="e.g. 10.0.0.53"
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+          />
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Static IP used by your router for DNS. Managed via Keepalived on up to 3 nodes.</small>
         </div>
 
         <button 

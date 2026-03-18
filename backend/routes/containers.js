@@ -109,10 +109,15 @@ router.post('/', async (req, res) => {
     const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
 
     const containerId = uuidv4();
-    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group, ha, tmpfs, stopGracePeriod, shmSize, devices, privileged };
+    const nodeId = req.body.current_node || process.env.NODE_ID || 'master'; 
+    const config = { 
+      image, name, env, volumes, ports, restartPolicy, resources, proxy, group, 
+      ha, ha_allowed_nodes: req.body.ha_allowed_nodes || [],
+      tmpfs, stopGracePeriod, shmSize, devices, privileged 
+    };
     
     // Save to DB first as intent
-    await saveContainer(containerId, name, config, 'running');
+    await saveContainer(containerId, name, config, 'running', null, nodeId);
 
     // Pull image if not exists
     try {
