@@ -1,9 +1,95 @@
 import docker from './docker.js';
-import { getContainers, updateContainerDockerId, getLocalNodeConfig } from './db.js';
+import { getContainers, updateContainerDockerId, getLocalNodeConfig, getNodes } from './db.js';
 import { addRoute } from './nginx.js';
+import etcd from './db.js';
+
+const SETTINGS_KEY = 'cluster/settings';
+
+const reconcileKeepalived = async () => {
+  try {
+    const settingsStr = await etcd.get(SETTINGS_KEY).string();
+    const settings = settingsStr ? JSON.parse(settingsStr) : null;
+    
+    if (!settings || !settings.sharedIpPool || !settings.backhaulNetwork) {
+      return;
+    }
+
+    const localNode = await getLocalNodeConfig();
+    if (!localNode || !localNode.id) return;
+
+    const allNodes = await getNodes();
+    const sortedNodes = allNodes.sort((a, b) => a.id.localeCompare(b.id));
+    const nodeIndex = sortedNodes.findIndex(n => n.id === localNode.id);
+
+    if (nodeIndex === -1) return;
+
+    const vip = settings.sharedIpPool.split('-')[0].trim();
+    const isMaster = nodeIndex === 0;
+    const priority = 100 - (nodeIndex * 10);
+    const containerName = 'core-docker-keepalived';
+
+    const config = `
+vrrp_instance VI_1 {
+    state ${isMaster ? 'MASTER' : 'BACKUP'}
+    interface eth0
+    virtual_router_id 51
+    priority ${priority}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass 1111
+    }
+    virtual_ipaddress {
+        ${vip}
+    }
+}
+`;
+
+    let container;
+    try {
+      container = docker.getContainer(containerName);
+      await container.inspect();
+    } catch (e) {
+      if (e.statusCode === 404) {
+        console.log('Creating Keepalived container...');
+        // We assume the image is available or was built during deployment
+        // For simplicity in this reconciler, we use a pre-built image or build it
+        container = await docker.createContainer({
+          Image: 'core-docker-keepalived:latest',
+          name: containerName,
+          HostConfig: {
+            CapAdd: ['NET_ADMIN', 'NET_BROADCAST'],
+            NetworkMode: 'backhaul', // Assuming backhaul network exists
+            RestartPolicy: { Name: 'always' }
+          }
+        });
+      }
+    }
+
+    const inspect = await container.inspect();
+    if (!inspect.State.Running) {
+      await container.start();
+    }
+
+    // Update configuration inside container
+    // This is a simplified approach; in production, you might mount a volume
+    const exec = await container.exec({
+      Cmd: ['sh', '-c', `echo "${config.replace(/"/g, '\\"')}" > /etc/keepalived/keepalived.conf && pkill -HUP keepalived`],
+      AttachStdout: true,
+      AttachStderr: true
+    });
+    await exec.start();
+
+  } catch (error) {
+    console.error('Keepalived reconciliation failed:', error.message);
+  }
+};
 
 export const reconcileContainers = async () => {
   console.log('Starting container reconciliation...');
+  
+  await reconcileKeepalived();
+
   const savedContainers = await getContainers();
 
   for (const saved of savedContainers) {

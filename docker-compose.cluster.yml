@@ -4,9 +4,6 @@ services:
     image: docker:dind
     privileged: true
     container_name: core-docker-dind-node1
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
     networks:
       backhaul:
         ipv4_address: 10.0.0.10
@@ -19,9 +16,6 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
     environment:
       - DOCKER_HOST=tcp://dind-node1:2375
       - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
@@ -60,14 +54,26 @@ services:
         ipv4_address: 10.0.0.13
     restart: always
 
+  keepalived-node1:
+    build:
+      context: .
+      dockerfile: keepalived/Dockerfile
+    container_name: core-docker-keepalived-node1
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    volumes:
+      - ./keepalived/node1.conf:/etc/keepalived/keepalived.conf
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.14
+    restart: always
+
   # --- NODE 2 ---
   dind-node2:
     image: docker:dind
     privileged: true
     container_name: core-docker-dind-node2
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
     networks:
       backhaul:
         ipv4_address: 10.0.0.20
@@ -80,9 +86,6 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
     environment:
       - DOCKER_HOST=tcp://dind-node2:2375
       - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
@@ -119,6 +122,91 @@ services:
     networks:
       backhaul:
         ipv4_address: 10.0.0.23
+    restart: always
+
+  keepalived-node2:
+    build:
+      context: .
+      dockerfile: keepalived/Dockerfile
+    container_name: core-docker-keepalived-node2
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    volumes:
+      - ./keepalived/node2.conf:/etc/keepalived/keepalived.conf
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.24
+    restart: always
+
+  # --- NODE 3 ---
+  dind-node3:
+    image: docker:dind
+    privileged: true
+    container_name: core-docker-dind-node3
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.30
+      web-proxy:
+    environment:
+      - DOCKER_TLS_CERTDIR=
+
+  backend-node3:
+    container_name: core-docker-backend-node3
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - DOCKER_HOST=tcp://dind-node3:2375
+      - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
+      - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
+    depends_on:
+      - dind-node3
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.31
+    restart: always
+
+  frontend-node3:
+    container_name: core-docker-frontend-node3
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend-node3
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.32
+    restart: always
+
+  proxy-node3:
+    image: nginx:latest
+    container_name: core-docker-proxy-node3
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - frontend-node3
+      - backend-node3
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.33
+    restart: always
+
+  keepalived-node3:
+    build:
+      context: .
+      dockerfile: keepalived/Dockerfile
+    container_name: core-docker-keepalived-node3
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    volumes:
+      - ./keepalived/node3.conf:/etc/keepalived/keepalived.conf
+    networks:
+      backhaul:
+        ipv4_address: 10.0.0.34
     restart: always
 
 networks:
