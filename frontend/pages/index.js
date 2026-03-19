@@ -10,8 +10,9 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('containers');
   const [containers, setContainers] = useState([]);
   const [info, setInfo] = useState(null);
+  const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error] = useState(null);
+  const [error, setError] = useState(null);
   const [stats, setStats] = useState({});
   const [events, setEvents] = useState([]);
   const [expandedContainer, setExpandedContainer] = useState(null);
@@ -20,12 +21,14 @@ export default function Home() {
 
   const refreshData = async () => {
     try {
-      const [containersRes, infoRes] = await Promise.all([
+      const [containersRes, infoRes, statusRes] = await Promise.all([
         fetch('/api/containers'),
-        fetch('/api/info')
+        fetch('/api/info'),
+        fetch('/api/system/status')
       ]);
       if (containersRes.ok) setContainers(await containersRes.json());
       if (infoRes.ok) setInfo(await infoRes.json());
+      if (statusRes.ok) setStatus(await statusRes.json());
     } catch (err) {
       console.error('Refresh error:', err);
     }
@@ -107,6 +110,71 @@ export default function Home() {
 
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
   if (error) return <div style={{ padding: '20px', color: 'red' }}>Error: {error}</div>;
+
+  const handleUnseal = async (e) => {
+    e.preventDefault();
+    const password = e.target.password.value;
+    const endpoint = status.initialized ? '/api/system/unseal' : '/api/system/setup';
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      if (res.ok) {
+        refreshData();
+      } else {
+        const err = await res.json();
+        alert(err.error);
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  if (status && !status.unsealed) {
+    return (
+      <div style={{
+        display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh',
+        fontFamily: 'sans-serif', background: '#f1f5f9'
+      }}>
+        <div style={{
+          background: '#fff', padding: '40px', borderRadius: '12px',
+          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', width: '400px'
+        }}>
+          <h1 style={{ marginTop: 0 }}>{status.initialized ? '🔒 Node Sealed' : '🚀 System Setup'}</h1>
+          <p style={{ color: '#64748b', marginBottom: '24px' }}>
+            {status.initialized
+              ? `Enter the master password to unseal node ${status.nodeName}.`
+              : 'Initialize the system by setting a master password. This will be used to encrypt all cluster secrets.'}
+          </p>
+          <form onSubmit={handleUnseal}>
+            <input
+              name="password" type="password" placeholder="Master Password" required
+              style={{
+                width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px',
+                border: '1px solid #e2e8f0', boxSizing: 'border-box'
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                width: '100%', padding: '12px', background: '#3b82f6', color: '#fff',
+                border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer'
+              }}
+            >
+              {status.initialized ? 'Unseal Node' : 'Initialize System'}
+            </button>
+          </form>
+          {status.initialized && (
+            <p style={{ marginTop: '20px', fontSize: '0.8em', color: '#94a3b8', textAlign: 'center' }}>
+              Node ID: {status.nodeId}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1400px', margin: '0 auto' }}>

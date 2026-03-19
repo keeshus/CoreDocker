@@ -15,6 +15,7 @@ import docker from './services/docker.js';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { registerLocalNode } from './services/db.js';
+import { isSystemInitialized, isNodeUnsealed, initializeSystem, unsealNode } from './services/secrets.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -46,6 +47,40 @@ app.use('/nodes', nodeRoutes);
 app.use('/secrets', secretRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/settings', settingsRoutes);
+
+// Unseal/Setup Routes
+app.get('/system/status', async (req, res) => {
+  res.json({
+    initialized: await isSystemInitialized(),
+    unsealed: isNodeUnsealed(),
+    nodeId,
+    nodeName
+  });
+});
+
+app.post('/system/setup', async (req, res) => {
+  try {
+    const { password } = req.body;
+    await initializeSystem(password);
+    // Re-register node to update unsealed status
+    await registerLocalNode(nodeId, nodeName, nodeIp);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/system/unseal', async (req, res) => {
+  try {
+    const { password } = req.body;
+    await unsealNode(password);
+    // Re-register node to update unsealed status
+    await registerLocalNode(nodeId, nodeName, nodeIp);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 
 const stopSystemContainers = async () => {
   console.log('Stopping and removing system containers...');

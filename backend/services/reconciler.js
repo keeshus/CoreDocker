@@ -104,8 +104,18 @@ const reconcileCoreDNS = async (localNodeId) => {
     const containerName = 'core-docker-coredns';
     let container;
     
+    const nodes = await getNodes();
+    let staticEntries = '';
+    for (const node of nodes) {
+      staticEntries += `    hosts {
+        ${node.ip} ${node.id}.core-docker.local
+        fallthrough
+    }\n`;
+    }
+
     const corefile = `
 .:53 {
+${staticEntries}
     etcd {
         path /skydns
         endpoint ${process.env.ETCD_HOSTS || 'http://core-docker-etcd:2379'}

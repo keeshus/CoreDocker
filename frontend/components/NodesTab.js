@@ -126,6 +126,7 @@ export default function NodesTab() {
             <th style={{ padding: '12px 10px' }}>Name</th>
             <th style={{ padding: '12px 10px' }}>IP Address</th>
             <th style={{ padding: '12px 10px' }}>Status</th>
+            <th style={{ padding: '12px 10px' }}>Security</th>
             <th style={{ padding: '12px 10px' }}>Paths (Backup / Non-Backup)</th>
             <th style={{ padding: '12px 10px', textAlign: 'right' }}>Actions</th>
           </tr>
@@ -147,6 +148,25 @@ export default function NodesTab() {
                 }}>
                   {node.status.toUpperCase()}
                 </span>
+              </td>
+              <td style={{ padding: '15px 10px' }}>
+                {node.unsealed ? (
+                  <span style={{ color: '#059669', fontSize: '0.9em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    🔓 Unsealed
+                  </span>
+                ) : (
+                  <a
+                    href={`http://${node.id}.core-docker.local`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      color: '#3b82f6', fontSize: '0.9em', textDecoration: 'none',
+                      display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold'
+                    }}
+                  >
+                    🔒 Sealed (Click to Unseal)
+                  </a>
+                )}
               </td>
               <td style={{ padding: '15px 10px', fontSize: '0.85em', color: '#64748b' }}>
                 <div><strong>B:</strong> {node.backupPath || '/data/backup'}</div>
