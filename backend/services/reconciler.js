@@ -2,6 +2,8 @@ import docker from './docker.js';
 import { getContainers, updateContainerDockerId, getLocalNodeConfig, getNodes } from './db.js';
 import { addRoute } from './nginx.js';
 import etcd from './db.js';
+import fs from 'fs';
+import path from 'path';
 
 const SETTINGS_KEY = 'cluster/settings';
 
@@ -115,9 +117,7 @@ const reconcileCoreDNS = async (localNodeId) => {
 `;
 
     // Always ensure the config directory and file exist on the host
-    const fs = require('fs');
-    const path = require('path');
-    const configDir = path.resolve(process.cwd(), 'coredns');
+    const configDir = '/tmp/coredns';
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
     }
@@ -146,7 +146,7 @@ const reconcileCoreDNS = async (localNodeId) => {
           name: containerName,
           Cmd: ['-conf', '/etc/coredns/Corefile'],
           HostConfig: {
-            Binds: [`${configDir}:/etc/coredns`],
+            Binds: [`${configDir}/Corefile:/etc/coredns/Corefile`],
             PortBindings: {
               '53/udp': [{ HostPort: finalPort }],
               '53/tcp': [{ HostPort: finalPort }]

@@ -52,7 +52,7 @@ const stopSystemContainers = async () => {
   try {
     const containers = await docker.listContainers({ all: true });
     for (const c of containers) {
-      if (c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend' && c.Names[0] !== '/core-docker-etcd') {
+      if (c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend') {
         console.log(`Cleaning up ${c.Names[0]}...`);
         try {
           const container = docker.getContainer(c.Id);

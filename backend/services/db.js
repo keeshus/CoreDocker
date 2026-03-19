@@ -4,7 +4,7 @@ import os from 'os';
 const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379', '127.0.0.1:2379'];
 const etcd = new Etcd3({ hosts: etcdHosts });
 
-export const waitForEtcd = async (retries = 30, delay = 2000) => {
+export const waitForEtcd = async (retries = 60, delay = 2000) => {
   console.log(`Connecting to ETCD at ${etcdHosts}...`);
   for (let i = 0; i < retries; i++) {
     try {
@@ -13,6 +13,8 @@ export const waitForEtcd = async (retries = 30, delay = 2000) => {
       console.log('Successfully connected to ETCD.');
       return true;
     } catch (e) {
+      // If we are getting UNAVAILABLE, we might need to recreate the client if it's stuck
+      // but usually etcd3 handles reconnection. We just need to wait.
       console.error(`ETCD connection attempt ${i + 1} failed: ${e.message}`);
       if (e.code === 'DEADLINE_EXCEEDED' || e.message.includes('DNS resolution failed')) {
         console.error('Details: ETCD host might not be reachable or service is starting up.');
