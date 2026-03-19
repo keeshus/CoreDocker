@@ -30,7 +30,7 @@ export default function Home() {
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         setStatus(statusData);
-        if (!statusData.unsealed) return; // Stop if sealed
+        if (!statusData.unsealed || !statusData.authenticated) return;
       }
 
       if (containersRes.ok) setContainers(await containersRes.json());
@@ -128,7 +128,7 @@ export default function Home() {
 
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
   
-  if (status && !status.unsealed) {
+  if (status && (!status.unsealed || !status.authenticated)) {
     return <UnsealView status={status} onUnseal={handleUnseal} />;
   }
 

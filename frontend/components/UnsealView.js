@@ -15,11 +15,15 @@ export default function UnsealView({ status, onUnseal }) {
         background: '#fff', padding: '40px', borderRadius: '12px', 
         boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', width: '400px' 
       }}>
-        <h1 style={{ marginTop: 0 }}>{status.initialized ? '🔒 Node Sealed' : '🚀 System Setup'}</h1>
+        <h1 style={{ marginTop: 0 }}>
+          {!status.authenticated ? '🔑 Login Required' : (status.initialized ? '🔒 Node Sealed' : '🚀 System Setup')}
+        </h1>
         <p style={{ color: '#64748b', marginBottom: '24px' }}>
-          {status.initialized 
-            ? `Enter the master password to unseal node ${status.nodeName}.` 
-            : 'Initialize the system by setting a master password. This will be used to encrypt all cluster secrets.'}
+          {!status.authenticated && status.unsealed
+            ? 'Your session has expired. Please log in with the master password.'
+            : (status.initialized
+                ? `Enter the master password to unseal node ${status.nodeName}.`
+                : 'Initialize the system by setting a master password. This will be used to encrypt all cluster secrets.')}
         </p>
         <form onSubmit={handleUnseal}>
           <input 
@@ -29,14 +33,14 @@ export default function UnsealView({ status, onUnseal }) {
               border: '1px solid #e2e8f0', boxSizing: 'border-box' 
             }} 
           />
-          <button 
-            type="submit" 
-            style={{ 
-              width: '100%', padding: '12px', background: '#3b82f6', color: '#fff', 
-              border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' 
+          <button
+            type="submit"
+            style={{
+              width: '100%', padding: '12px', background: '#3b82f6', color: '#fff',
+              border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer'
             }}
           >
-            {status.initialized ? 'Unseal Node' : 'Initialize System'}
+            {!status.authenticated && status.unsealed ? 'Login' : (status.initialized ? 'Unseal Node' : 'Initialize System')}
           </button>
         </form>
         {status.initialized && (

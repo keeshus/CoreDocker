@@ -1,4 +1,8 @@
 import express from 'express';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import containerRoutes from './routes/containers.js';
 import infoRoutes from './routes/info.js';
 import eventRoutes from './routes/events.js';
@@ -26,11 +30,16 @@ import {
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Use a random secret for the JWT to ensure sessions are invalidated on restart
+const JWT_SECRET = crypto.randomBytes(64).toString('hex');
+
 const nodeId = process.env.NODE_ID || uuidv4();
 const nodeName = process.env.NODE_NAME || 'node-1';
 
 const nodeIp = process.env.NODE_IP || '127.0.0.1';
 
+app.use(helmet());
+app.use(cookieParser());
 app.use(express.json());
 
 let clusterBooted = false;
@@ -56,16 +65,21 @@ const bootCluster = async (nodeId) => {
   }
 };
 
-// Routes
-app.use('/containers', containerRoutes);
-app.use('/info', infoRoutes);
-app.use('/events', eventRoutes);
-app.use('/nodes', nodeRoutes);
-app.use('/secrets', secretRoutes);
-app.use('/tasks', taskRoutes);
-app.use('/settings', settingsRoutes);
+// Auth Middleware
+const requireAuth = (req, res, next) => {
+  const token = req.cookies.token;
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
 
-// Unseal/Setup Routes
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid or expired session' });
+  }
+};
+
+// Unseal Middleware
 const requireUnsealed = (req, res, next) => {
   if (!isNodeUnsealed()) {
     return res.status(423).json({
@@ -78,14 +92,29 @@ const requireUnsealed = (req, res, next) => {
   next();
 };
 
-app.use('/containers', requireUnsealed);
-app.use('/secrets', requireUnsealed);
-app.use('/tasks', requireUnsealed);
+// Routes
+app.use('/containers', requireAuth, requireUnsealed, containerRoutes);
+app.use('/info', requireAuth, infoRoutes);
+app.use('/events', requireAuth, eventRoutes);
+app.use('/nodes', requireAuth, nodeRoutes);
+app.use('/secrets', requireAuth, requireUnsealed, secretRoutes);
+app.use('/tasks', requireAuth, requireUnsealed, taskRoutes);
+app.use('/settings', requireAuth, settingsRoutes);
 
+// Unseal/Setup Routes
 app.get('/system/status', async (req, res) => {
+  let authenticated = false;
+  if (req.cookies.token) {
+    try {
+      jwt.verify(req.cookies.token, JWT_SECRET);
+      authenticated = true;
+    } catch (err) {}
+  }
+
   res.json({
     initialized: await isSystemInitialized(),
     unsealed: isNodeUnsealed(),
+    authenticated,
     nodeId,
     nodeName
   });
@@ -95,10 +124,12 @@ app.post('/system/setup', async (req, res) => {
   try {
     const { password } = req.body;
     await initializeSystem(password);
-    // Re-register node to update unsealed status
     await registerLocalNode(nodeId, nodeName, nodeIp);
-    // Boot cluster after successful initialization
     await bootCluster(nodeId);
+
+    const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
+    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    
     res.json({ success: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -109,17 +140,24 @@ app.post('/system/unseal', async (req, res) => {
   try {
     const { password } = req.body;
     await unsealNode(password);
-    // Re-register node to update unsealed status
     await registerLocalNode(nodeId, nodeName, nodeIp);
-    // Boot cluster after successful unsealing
     await bootCluster(nodeId);
+
+    const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
+    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    
     res.json({ success: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
 
-app.post('/system/change-password', requireUnsealed, async (req, res) => {
+app.post('/system/logout', (req, res) => {
+  res.clearCookie('token');
+  res.json({ success: true });
+});
+
+app.post('/system/change-password', requireAuth, requireUnsealed, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     await changeMasterPassword(currentPassword, newPassword);
@@ -129,7 +167,7 @@ app.post('/system/change-password', requireUnsealed, async (req, res) => {
   }
 });
 
-app.post('/system/rotate-dek', requireUnsealed, async (req, res) => {
+app.post('/system/rotate-dek', requireAuth, requireUnsealed, async (req, res) => {
   try {
     const { masterPassword } = req.body;
     await rotateDEK(masterPassword);
@@ -175,7 +213,6 @@ app.listen(port, async () => {
     await waitForEtcd();
     await registerLocalNode(nodeId, nodeName, nodeIp);
     
-    // Boot cluster if already unsealed
     if (isNodeUnsealed()) {
       await bootCluster(nodeId);
     } else {

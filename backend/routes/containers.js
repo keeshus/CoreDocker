@@ -1,5 +1,6 @@
 import express from 'express';
 import docker from '../services/docker.js';
+import etcd from '../services/db.js';
 import { addRoute, removeRoute } from '../services/nginx.js';
 import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig } from '../services/db.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -113,6 +114,15 @@ router.post('/', async (req, res) => {
       tmpfs, stopGracePeriod, shmSize, devices, privileged 
     };
     
+    // Security check for privileged containers
+    if (privileged) {
+      const settings = await etcd.get('core/settings').string();
+      const allowPrivileged = settings ? JSON.parse(settings).allowPrivileged === true : false;
+      if (!allowPrivileged) {
+        return res.status(403).json({ error: 'Privileged containers are disabled in cluster settings' });
+      }
+    }
+
     // Save to DB first as intent
     await saveContainer(containerId, name, config, 'running', null, nodeId);
 
@@ -177,6 +187,15 @@ router.put('/:id', async (req, res) => {
       dbId = uuidv4();
     }
     
+    // Security check for privileged containers
+    if (privileged) {
+      const settings = await etcd.get('core/settings').string();
+      const allowPrivileged = settings ? JSON.parse(settings).allowPrivileged === true : false;
+      if (!allowPrivileged) {
+        return res.status(403).json({ error: 'Privileged containers are disabled in cluster settings' });
+      }
+    }
+
     await saveContainer(dbId, name, config, 'running');
 
     // Pull image if not exists

@@ -19,6 +19,18 @@ export default function AppLayout({ children, activeTab, setActiveTab, info, onR
                 <span><strong>CPUs:</strong> {info.NCPU}</span>
               </div>
             )}
+            <button
+              onClick={async () => {
+                await fetch('/api/system/logout', { method: 'POST' });
+                window.location.reload();
+              }}
+              style={{
+                background: '#fee2e2', color: '#dc2626', border: 'none',
+                padding: '8px 15px', borderRadius: '20px', cursor: 'pointer', fontSize: '0.85em', fontWeight: 'bold'
+              }}
+            >
+              Logout
+            </button>
             <CreateContainer onCreated={onRefresh} />
           </div>
         </div>

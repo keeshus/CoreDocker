@@ -16,7 +16,10 @@
     "react": "latest",
     "react-dom": "latest",
     "lucide-react": "latest",
-    "uuid": "latest"
+    "uuid": "latest",
+    "helmet": "latest",
+    "cookie-parser": "latest",
+    "jsonwebtoken": "latest"
   },
   "devDependencies": {
     "nodemon": "latest"
