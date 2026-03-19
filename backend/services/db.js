@@ -1,9 +1,61 @@
 import { Etcd3 } from 'etcd3';
 import os from 'os';
-import { isNodeUnsealed } from './secrets.js';
+import { isNodeUnsealed, encrypt, decrypt } from './secrets.js';
 
 const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379', '127.0.0.1:2379'];
 const etcd = new Etcd3({ hosts: etcdHosts });
+
+/**
+ * CoreDB Wrapper to handle encryption for keys starting with 'core/'
+ */
+class CoreDB {
+  async put(key, value) {
+    let finalValue = typeof value === 'string' ? value : JSON.stringify(value);
+    if (key.startsWith('core/')) {
+      finalValue = encrypt(finalValue);
+    }
+    return await etcd.put(key).value(finalValue);
+  }
+
+  async get(key) {
+    const rawValue = await etcd.get(key).string();
+    if (!rawValue) return null;
+    
+    let processedValue = rawValue;
+    if (key.startsWith('core/')) {
+      processedValue = decrypt(rawValue);
+    }
+
+    try {
+      return JSON.parse(processedValue);
+    } catch (e) {
+      return processedValue;
+    }
+  }
+
+  async getAll(prefix) {
+    const all = await etcd.getAll().prefix(prefix).strings();
+    const results = {};
+    for (const [key, value] of Object.entries(all)) {
+      let processedValue = value;
+      if (key.startsWith('core/')) {
+        processedValue = decrypt(value);
+      }
+      try {
+        results[key] = JSON.parse(processedValue);
+      } catch (e) {
+        results[key] = processedValue;
+      }
+    }
+    return results;
+  }
+
+  async delete(key) {
+    return await etcd.delete().key(key);
+  }
+}
+
+const db = new CoreDB();
 
 export const waitForEtcd = async (retries = 60, delay = 2000) => {
   console.log(`Connecting to ETCD at ${etcdHosts}...`);
@@ -26,7 +78,7 @@ export const waitForEtcd = async (retries = 60, delay = 2000) => {
   }
 };
 
-const PREFIX = 'containers/';
+const PREFIX = 'core/containers/';
 const NODE_PREFIX = 'nodes/';
 
 let nodeLease = null;
@@ -54,14 +106,15 @@ export const registerLocalNode = async (nodeId, name, ip) => {
     unsealed: isNodeUnsealed(),
     lastSeen: Date.now()
   };
+  // Nodes are NOT encrypted, they use NODE_PREFIX which does not start with core/
   await nodeLease.put(`${NODE_PREFIX}${nodeId}`).value(JSON.stringify(node));
   console.log(`Node ${nodeId} registered with lease (Unsealed: ${node.unsealed}).`);
 };
 
 export const getNodes = async () => {
   try {
-    const allNodes = await etcd.getAll().prefix(NODE_PREFIX).strings();
-    return Object.values(allNodes).map(n => JSON.parse(n));
+    const allNodes = await db.getAll(NODE_PREFIX);
+    return Object.values(allNodes);
   } catch (e) {
     console.error(`Failed to get nodes from ETCD: ${e.message}`);
     throw e;
@@ -70,11 +123,11 @@ export const getNodes = async () => {
 
 export const saveNode = async (id, name, ip, status = 'offline', backupPath = '/data/backup', nonBackupPath = '/data/non-backup') => {
   const node = { id, name, ip, status, backupPath, nonBackupPath };
-  await etcd.put(`${NODE_PREFIX}${id}`).value(JSON.stringify(node));
+  await db.put(`${NODE_PREFIX}${id}`, node);
 };
 
 export const deleteNode = async (id) => {
-  await etcd.delete().key(`${NODE_PREFIX}${id}`);
+  await db.delete(`${NODE_PREFIX}${id}`);
 };
 
 export const getLocalNodeConfig = async () => {
@@ -94,13 +147,12 @@ export const getLocalNodeConfig = async () => {
 };
 
 export const getContainers = async () => {
-  const allContainers = await etcd.getAll().prefix(PREFIX).strings();
-  return Object.values(allContainers).map(c => JSON.parse(c));
+  const allContainers = await db.getAll(PREFIX);
+  return Object.values(allContainers);
 };
 
 export const getContainerById = async (id) => {
-  const containers = await getContainers();
-  return containers.find(c => c.id === id) || null;
+  return await db.get(`${PREFIX}${id}`);
 };
 
 export const getContainerByName = async (name) => {
@@ -110,29 +162,27 @@ export const getContainerByName = async (name) => {
 
 export const saveContainer = async (id, name, config, status, docker_id = null, current_node = null) => {
   const container = { id, name, config, status, docker_id, current_node };
-  await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(container));
+  await db.put(`${PREFIX}${id}`, container);
 };
 
 export const updateContainerDockerId = async (id, docker_id) => {
-  const cString = await etcd.get(`${PREFIX}${id}`).string();
-  if (cString) {
-    const c = JSON.parse(cString);
+  const c = await db.get(`${PREFIX}${id}`);
+  if (c) {
     c.docker_id = docker_id;
-    await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(c));
+    await db.put(`${PREFIX}${id}`, c);
   }
 };
 
 export const updateContainerStatus = async (id, status) => {
-  const cString = await etcd.get(`${PREFIX}${id}`).string();
-  if (cString) {
-    const c = JSON.parse(cString);
+  const c = await db.get(`${PREFIX}${id}`);
+  if (c) {
     c.status = status;
-    await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(c));
+    await db.put(`${PREFIX}${id}`, c);
   }
 };
 
 export const deleteContainer = async (id) => {
-  await etcd.delete().key(`${PREFIX}${id}`);
+  await db.delete(`${PREFIX}${id}`);
 };
 
 export default etcd;

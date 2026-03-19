@@ -1,5 +1,6 @@
 import docker from './docker.js';
 import { getContainers, updateContainerDockerId, getLocalNodeConfig, getNodes } from './db.js';
+import { getSecret } from './secrets.js';
 import { addRoute } from './nginx.js';
 import etcd from './db.js';
 import fs from 'fs';
@@ -240,10 +241,26 @@ export const reconcileContainers = async (localNodeId) => {
           return `${hostPath}:${v.container}`;
         });
 
+        const env = [];
+        for (const e of (config.env || [])) {
+          let val = e.value;
+          const secretMatch = val.match(/^\{\{SECRET:(.+)\}\}$/);
+          if (secretMatch) {
+            const secretKey = secretMatch[1];
+            const plaintext = await getSecret(secretKey);
+            if (plaintext === null) {
+              console.error(`[Reconciler] Secret ${secretKey} not found for container ${name}. Failing creation.`);
+              throw new Error(`Secret ${secretKey} not found`);
+            }
+            val = plaintext;
+          }
+          env.push(`${e.key}=${val}`);
+        }
+
         const createOpts = {
           Image: config.image,
           name: name,
-          Env: (config.env || []).map(e => `${e.key}=${e.value}`),
+          Env: env,
           ExposedPorts,
           HostConfig: {
             RestartPolicy: { Name: config.restartPolicy || 'unless-stopped' },

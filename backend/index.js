@@ -14,7 +14,14 @@ import { startOrchestrator } from './services/orchestrator.js';
 import docker from './services/docker.js';
 import { v4 as uuidv4 } from 'uuid';
 import { registerLocalNode } from './services/db.js';
-import { isSystemInitialized, isNodeUnsealed, initializeSystem, unsealNode } from './services/secrets.js';
+import { 
+  isSystemInitialized, 
+  isNodeUnsealed, 
+  initializeSystem, 
+  unsealNode,
+  changeMasterPassword,
+  rotateDEK
+} from './services/secrets.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -25,6 +32,29 @@ const nodeName = process.env.NODE_NAME || 'node-1';
 const nodeIp = process.env.NODE_IP || '127.0.0.1';
 
 app.use(express.json());
+
+let clusterBooted = false;
+
+const bootCluster = async (nodeId) => {
+  if (clusterBooted) {
+    console.log('[Cluster] Already booted.');
+    return;
+  }
+  if (!isNodeUnsealed()) {
+    console.log('[Cluster] Cannot boot: Node is sealed.');
+    return;
+  }
+  console.log('[Cluster] Booting services...');
+  try {
+    await reconcileContainers(nodeId);
+    startScheduler();
+    startOrchestrator(nodeId);
+    clusterBooted = true;
+    console.log('[Cluster] Services started successfully.');
+  } catch (e) {
+    console.error(`[Cluster] Boot failed: ${e.message}`);
+  }
+};
 
 // Routes
 app.use('/containers', containerRoutes);
@@ -67,6 +97,8 @@ app.post('/system/setup', async (req, res) => {
     await initializeSystem(password);
     // Re-register node to update unsealed status
     await registerLocalNode(nodeId, nodeName, nodeIp);
+    // Boot cluster after successful initialization
+    await bootCluster(nodeId);
     res.json({ success: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -79,6 +111,28 @@ app.post('/system/unseal', async (req, res) => {
     await unsealNode(password);
     // Re-register node to update unsealed status
     await registerLocalNode(nodeId, nodeName, nodeIp);
+    // Boot cluster after successful unsealing
+    await bootCluster(nodeId);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/system/change-password', requireUnsealed, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    await changeMasterPassword(currentPassword, newPassword);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/system/rotate-dek', requireUnsealed, async (req, res) => {
+  try {
+    const { masterPassword } = req.body;
+    await rotateDEK(masterPassword);
     res.json({ success: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -120,9 +174,13 @@ app.listen(port, async () => {
     await bootstrapEtcd();
     await waitForEtcd();
     await registerLocalNode(nodeId, nodeName, nodeIp);
-    await reconcileContainers(nodeId);
-    startScheduler();
-    startOrchestrator(nodeId);
+    
+    // Boot cluster if already unsealed
+    if (isNodeUnsealed()) {
+      await bootCluster(nodeId);
+    } else {
+      console.log('[Cluster] Node is sealed. Waiting for manual unseal.');
+    }
   } catch (e) {
     console.error(`Startup failed: ${e.message}`);
     process.exit(1);

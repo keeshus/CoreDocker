@@ -7,6 +7,12 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Security Form State
+  const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
+  const [rotationPassword, setRotationPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isRotating, setIsRotating] = useState(false);
+
   useEffect(() => {
     fetch('/api/settings')
       .then(res => res.json())
@@ -41,6 +47,58 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
       alert('Error saving settings: ' + e.message);
     }
     setSaving(false);
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (passwords.next !== passwords.confirm) {
+      alert("New passwords don't match!");
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      const res = await fetch('/api/system/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: passwords.current,
+          newPassword: passwords.next
+        })
+      });
+      if (res.ok) {
+        alert('Master password updated successfully!');
+        setPasswords({ current: '', next: '', confirm: '' });
+      } else {
+        const error = await res.json();
+        alert('Error: ' + error.error);
+      }
+    } catch (e) {
+      alert('Error changing password: ' + e.message);
+    }
+    setIsChangingPassword(false);
+  };
+
+  const handleRotateDEK = async () => {
+    const password = prompt("DANGER: This will re-encrypt all cluster data. Enter your Master Password to authorize DEK rotation:");
+    if (!password) return;
+
+    setIsRotating(true);
+    try {
+      const res = await fetch('/api/system/rotate-dek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ masterPassword: password })
+      });
+      if (res.ok) {
+        alert('Data Encryption Key rotated successfully! All data has been re-encrypted.');
+      } else {
+        const error = await res.json();
+        alert('Error: ' + error.error);
+      }
+    } catch (e) {
+      alert('Error rotating DEK: ' + e.message);
+    }
+    setIsRotating(false);
   };
 
   if (loading) return <div>Loading settings...</div>;
@@ -95,6 +153,86 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
       </form>
+
+      <div style={{ marginTop: '40px', padding: '20px', background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <h3 style={{ marginTop: 0, color: '#1e293b' }}>Security</h3>
+        <p style={{ color: '#64748b', fontSize: '0.9em' }}>Manage your master password and data encryption keys.</p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', marginTop: '20px' }}>
+          {/* Change Password Form */}
+          <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <h4 style={{ margin: 0 }}>Change Master Password</h4>
+            
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8em', fontWeight: 'bold', marginBottom: '4px' }}>Current Password</label>
+              <input 
+                type="password" 
+                value={passwords.current} 
+                onChange={e => setPasswords({...passwords, current: e.target.value})}
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8em', fontWeight: 'bold', marginBottom: '4px' }}>New Password</label>
+              <input 
+                type="password" 
+                value={passwords.next} 
+                onChange={e => setPasswords({...passwords, next: e.target.value})}
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8em', fontWeight: 'bold', marginBottom: '4px' }}>Confirm New Password</label>
+              <input 
+                type="password" 
+                value={passwords.confirm} 
+                onChange={e => setPasswords({...passwords, confirm: e.target.value})}
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                required
+              />
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={isChangingPassword}
+              style={{ padding: '8px 16px', background: '#1e293b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', width: 'fit-content' }}
+            >
+              {isChangingPassword ? 'Updating...' : 'Update Password'}
+            </button>
+          </form>
+
+          {/* DEK Rotation */}
+          <div style={{ padding: '15px', border: '1px solid #fee2e2', borderRadius: '8px', background: '#fff1f1' }}>
+            <h4 style={{ margin: 0, color: '#991b1b' }}>Rotate Data Encryption Key (DEK)</h4>
+            <p style={{ fontSize: '0.85em', color: '#b91c1c', margin: '10px 0' }}>
+              <strong>Warning:</strong> This will re-encrypt all containers, tasks, and secrets with a brand new key. 
+              If this process is interrupted, your cluster data may become permanently unreadable. 
+              <strong>Take a backup first.</strong>
+            </p>
+            
+            <button 
+              onClick={handleRotateDEK}
+              disabled={isRotating}
+              style={{ 
+                marginTop: '10px',
+                padding: '10px 20px', 
+                background: '#dc2626', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px', 
+                cursor: 'pointer', 
+                fontWeight: 'bold' 
+              }}
+            >
+              {isRotating ? 'Rotating Keys...' : 'Rotate DEK Now'}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
         <h3 style={{ marginTop: 0 }}>System Containers</h3>

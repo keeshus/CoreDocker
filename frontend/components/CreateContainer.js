@@ -3,12 +3,13 @@ import React, { useState, useEffect } from 'react';
 export default function CreateContainer({ onCreated, initialData = null, onClose = null, isOpenMode = false }) {
   const [isOpen, setIsOpen] = useState(isOpenMode);
   const [loading, setLoading] = useState(false);
+  const [secrets, setSecrets] = useState([]);
   
   const defaultFormData = {
     name: '',
     image: '',
     restartPolicy: 'unless-stopped',
-    env: [{ key: '', value: '' }],
+    env: [{ key: '', value: '', isSecret: false }],
     volumes: [{ type: 'backup', host: '', container: '' }],
     ports: [{ host: '', container: '', ip: '0.0.0.0' }],
     resources: { cpu: '', memory: '' },
@@ -26,11 +27,26 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
   const [formData, setFormData] = useState(defaultFormData);
 
   useEffect(() => {
+    fetch('/api/secrets')
+      .then(res => res.json())
+      .then(data => setSecrets(data || []))
+      .catch(err => console.error('Failed to fetch secrets:', err));
+  }, []);
+
+  useEffect(() => {
     if (initialData) {
+      const parsedEnv = (initialData.env || []).map(e => {
+        const secretMatch = e.value?.match(/^\{\{SECRET:(.+)\}\}$/);
+        if (secretMatch) {
+          return { key: e.key, value: secretMatch[1], isSecret: true };
+        }
+        return { ...e, isSecret: false };
+      });
+
       setFormData({
         ...defaultFormData,
         ...initialData,
-        env: initialData.env?.length ? initialData.env : [{ key: '', value: '' }],
+        env: parsedEnv.length ? parsedEnv : [{ key: '', value: '', isSecret: false }],
         volumes: initialData.volumes?.length ? initialData.volumes : [{ type: 'backup', host: '', container: '' }],
         ports: initialData.ports?.length ? initialData.ports : [{ host: '', container: '', ip: '0.0.0.0' }],
         resources: initialData.resources || { cpu: '', memory: '' },
@@ -81,7 +97,12 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     // Clean up empty fields
     const payload = {
       ...formData,
-      env: formData.env.filter(e => e.key && e.value),
+      env: formData.env
+        .filter(e => e.key && e.value)
+        .map(e => ({
+          key: e.key,
+          value: e.isSecret ? `{{SECRET:${e.value}}}` : e.value
+        })),
       volumes: formData.volumes.filter(v => (v.type !== 'custom' || v.host) && v.container),
       ports: formData.ports.filter(p => p.container).map(p => ({
         ...p,
@@ -187,13 +208,37 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                 <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Environment Variables</summary>
                 <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none' }}>
                   {formData.env.map((e, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                    <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
                       <input type="text" placeholder="Key" value={e.key} onChange={ev => handleArrayChange('env', i, 'key', ev.target.value)} style={{ flex: 1, padding: '8px' }} />
-                      <input type="text" placeholder="Value" value={e.value} onChange={ev => handleArrayChange('env', i, 'value', ev.target.value)} style={{ flex: 1, padding: '8px' }} />
-                      <button type="button" onClick={() => removeArrayItem('env', i)}>X</button>
+                      
+                      {e.isSecret ? (
+                        <select
+                          value={e.value}
+                          onChange={ev => handleArrayChange('env', i, 'value', ev.target.value)}
+                          style={{ flex: 1, padding: '8px' }}
+                        >
+                          <option value="">-- Select Secret --</option>
+                          {secrets.map(s => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input type="text" placeholder="Value" value={e.value} onChange={ev => handleArrayChange('env', i, 'value', ev.target.value)} style={{ flex: 1, padding: '8px' }} />
+                      )}
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+                        <input
+                          type="checkbox"
+                          checked={e.isSecret}
+                          onChange={ev => handleArrayChange('env', i, 'isSecret', ev.target.checked)}
+                        />
+                        Secret
+                      </label>
+
+                      <button type="button" onClick={() => removeArrayItem('env', i)} style={{ padding: '4px 8px' }}>X</button>
                     </div>
                   ))}
-                  <button type="button" onClick={() => addArrayItem('env', {key: '', value: ''})}>+ Add Env</button>
+                  <button type="button" onClick={() => addArrayItem('env', {key: '', value: '', isSecret: false})}>+ Add Env</button>
                 </div>
               </details>
 
