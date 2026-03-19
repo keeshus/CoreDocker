@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import ContainerRow from '../components/ContainerRow';
-import CreateContainer from '../components/CreateContainer';
 import NodesTab from '../components/NodesTab';
 import SecretsTab from '../components/SecretsTab';
 import TasksTab from '../components/TasksTab';
 import SettingsTab from '../components/SettingsTab';
+import AppLayout from '../components/AppLayout';
+import UnsealView from '../components/UnsealView';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('containers');
@@ -12,7 +13,6 @@ export default function Home() {
   const [info, setInfo] = useState(null);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [stats, setStats] = useState({});
   const [events, setEvents] = useState([]);
   const [expandedContainer, setExpandedContainer] = useState(null);
@@ -26,9 +26,15 @@ export default function Home() {
         fetch('/api/info'),
         fetch('/api/system/status')
       ]);
+      
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        setStatus(statusData);
+        if (!statusData.unsealed) return; // Stop if sealed
+      }
+
       if (containersRes.ok) setContainers(await containersRes.json());
       if (infoRes.ok) setInfo(await infoRes.json());
-      if (statusRes.ok) setStatus(await statusRes.json());
     } catch (err) {
       console.error('Refresh error:', err);
     }
@@ -42,14 +48,11 @@ export default function Home() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'docker-event') {
-          setEvents(prev => {
-            const newEvents = [...prev, { 
-              id: Date.now() + Math.random(), 
-              time: new Date().toLocaleTimeString(), 
-              ...data 
-            }].slice(-20);
-            return newEvents;
-          });
+          setEvents(prev => [...prev, { 
+            id: Date.now() + Math.random(), 
+            time: new Date().toLocaleTimeString(), 
+            ...data 
+          }].slice(-20));
           refreshData();
         } else if (data.type === 'container-stats') {
           setStats(prev => ({ ...prev, [data.id]: data }));
@@ -66,54 +69,7 @@ export default function Home() {
     }
   }, [events]);
 
-  const handleEdit = (container) => {
-    setEditingContainer({
-      dockerId: container.Id,
-      ...container.persistedConfig
-    });
-  };
-
-  const handlePersist = async (container) => {
-    try {
-      const res = await fetch(`/api/containers/${container.Id}/persist`, {
-        method: 'POST'
-      });
-      if (res.ok) {
-        alert('Container successfully migrated to CoreDocker.');
-        refreshData();
-      } else {
-        const err = await res.json();
-        alert('Failed to migrate: ' + err.error);
-      }
-    } catch (e) {
-      alert('Failed to migrate: ' + e.message);
-    }
-  };
-
-  const handleDelete = async (container) => {
-    if (!window.confirm(`Are you sure you want to completely delete ${container.Names[0]}?`)) return;
-    try {
-      const res = await fetch(`/api/containers/${container.Id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        alert('Container deleted.');
-        refreshData();
-      } else {
-        const err = await res.json();
-        alert('Failed to delete: ' + err.error);
-      }
-    } catch (e) {
-      alert('Failed to delete: ' + e.message);
-    }
-  };
-
-  if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
-  if (error) return <div style={{ padding: '20px', color: 'red' }}>Error: {error}</div>;
-
-  const handleUnseal = async (e) => {
-    e.preventDefault();
-    const password = e.target.password.value;
+  const handleUnseal = async (password) => {
     const endpoint = status.initialized ? '/api/system/unseal' : '/api/system/setup';
     try {
       const res = await fetch(endpoint, {
@@ -132,104 +88,57 @@ export default function Home() {
     }
   };
 
+  const handleEdit = (container) => {
+    setEditingContainer({
+      dockerId: container.Id,
+      ...container.persistedConfig
+    });
+  };
+
+  const handlePersist = async (container) => {
+    try {
+      const res = await fetch(`/api/containers/${container.Id}/persist`, { method: 'POST' });
+      if (res.ok) {
+        alert('Container successfully migrated to CoreDocker.');
+        refreshData();
+      } else {
+        const err = await res.json();
+        alert('Failed to migrate: ' + err.error);
+      }
+    } catch (e) {
+      alert('Failed to migrate: ' + e.message);
+    }
+  };
+
+  const handleDelete = async (container) => {
+    if (!window.confirm(`Are you sure you want to completely delete ${container.Names[0]}?`)) return;
+    try {
+      const res = await fetch(`/api/containers/${container.Id}`, { method: 'DELETE' });
+      if (res.ok) {
+        alert('Container deleted.');
+        refreshData();
+      } else {
+        const err = await res.json();
+        alert('Failed to delete: ' + err.error);
+      }
+    } catch (e) {
+      alert('Failed to delete: ' + e.message);
+    }
+  };
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
+  
   if (status && !status.unsealed) {
-    return (
-      <div style={{
-        display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh',
-        fontFamily: 'sans-serif', background: '#f1f5f9'
-      }}>
-        <div style={{
-          background: '#fff', padding: '40px', borderRadius: '12px',
-          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', width: '400px'
-        }}>
-          <h1 style={{ marginTop: 0 }}>{status.initialized ? '🔒 Node Sealed' : '🚀 System Setup'}</h1>
-          <p style={{ color: '#64748b', marginBottom: '24px' }}>
-            {status.initialized
-              ? `Enter the master password to unseal node ${status.nodeName}.`
-              : 'Initialize the system by setting a master password. This will be used to encrypt all cluster secrets.'}
-          </p>
-          <form onSubmit={handleUnseal}>
-            <input
-              name="password" type="password" placeholder="Master Password" required
-              style={{
-                width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px',
-                border: '1px solid #e2e8f0', boxSizing: 'border-box'
-              }}
-            />
-            <button
-              type="submit"
-              style={{
-                width: '100%', padding: '12px', background: '#3b82f6', color: '#fff',
-                border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer'
-              }}
-            >
-              {status.initialized ? 'Unseal Node' : 'Initialize System'}
-            </button>
-          </form>
-          {status.initialized && (
-            <p style={{ marginTop: '20px', fontSize: '0.8em', color: '#94a3b8', textAlign: 'center' }}>
-              Node ID: {status.nodeId}
-            </p>
-          )}
-        </div>
-      </div>
-    );
+    return <UnsealView status={status} onUnseal={handleUnseal} />;
   }
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1400px', margin: '0 auto' }}>
-      <header style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '30px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ margin: 0 }}>Docker Manager</h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            {info && (
-              <div style={{ 
-                display: 'flex', gap: '20px', fontSize: '0.85em', background: '#f8fafc', 
-                padding: '8px 15px', borderRadius: '20px', border: '1px solid #e2e8f0', color: '#64748b' 
-              }}>
-                <span><strong>OS:</strong> {info.OperatingSystem}</span>
-                <span><strong>Kernel:</strong> {info.KernelVersion}</span>
-                <span><strong>Containers:</strong> {info.Containers} (Run: {info.ContainersRunning})</span>
-                <span><strong>CPUs:</strong> {info.NCPU}</span>
-              </div>
-            )}
-            <CreateContainer onCreated={refreshData} />
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-          <button 
-            onClick={() => setActiveTab('containers')} 
-            style={{ background: activeTab === 'containers' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'containers' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
-          >
-            Containers
-          </button>
-          <button 
-            onClick={() => setActiveTab('nodes')} 
-            style={{ background: activeTab === 'nodes' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'nodes' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
-          >
-            Cluster Nodes
-          </button>
-          <button
-            onClick={() => setActiveTab('secrets')}
-            style={{ background: activeTab === 'secrets' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'secrets' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
-          >
-            Secret Manager
-          </button>
-          <button
-            onClick={() => setActiveTab('tasks')}
-            style={{ background: activeTab === 'tasks' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'tasks' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
-          >
-            Scheduler & Tasks
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            style={{ background: activeTab === 'settings' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'settings' ? '#fff' : '#475569', border: 'none', padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
-          >
-            Master Settings
-          </button>
-        </div>
-      </header>
-      
+    <AppLayout 
+      activeTab={activeTab} 
+      setActiveTab={setActiveTab} 
+      info={info} 
+      onRefresh={refreshData}
+    >
       {activeTab === 'containers' && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '40px' }}>
@@ -305,6 +214,6 @@ export default function Home() {
       {activeTab === 'secrets' && <SecretsTab />}
       {activeTab === 'tasks' && <TasksTab />}
       {activeTab === 'settings' && <SettingsTab systemContainers={containers.filter(c => c.Names[0].startsWith('/core-docker-'))} stats={stats} />}
-    </div>
+    </AppLayout>
   );
 }

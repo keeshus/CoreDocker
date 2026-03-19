@@ -12,7 +12,6 @@ import { waitForEtcd } from './services/db.js';
 import { startScheduler } from './services/scheduler.js';
 import { startOrchestrator } from './services/orchestrator.js';
 import docker from './services/docker.js';
-import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { registerLocalNode } from './services/db.js';
 import { isSystemInitialized, isNodeUnsealed, initializeSystem, unsealNode } from './services/secrets.js';
@@ -21,21 +20,9 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 const nodeId = process.env.NODE_ID || uuidv4();
-const nodeName = process.env.NODE_NAME || os.hostname();
+const nodeName = process.env.NODE_NAME || 'node-1';
 
-const getLocalIp = () => {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (!iface.internal && iface.family === 'IPv4') {
-        return iface.address;
-      }
-    }
-  }
-  return '127.0.0.1';
-};
-
-const nodeIp = getLocalIp();
+const nodeIp = process.env.NODE_IP || '127.0.0.1';
 
 app.use(express.json());
 
@@ -49,6 +36,22 @@ app.use('/tasks', taskRoutes);
 app.use('/settings', settingsRoutes);
 
 // Unseal/Setup Routes
+const requireUnsealed = (req, res, next) => {
+  if (!isNodeUnsealed()) {
+    return res.status(423).json({
+      error: 'Node is sealed',
+      nodeId,
+      nodeName,
+      unsealed: false
+    });
+  }
+  next();
+};
+
+app.use('/containers', requireUnsealed);
+app.use('/secrets', requireUnsealed);
+app.use('/tasks', requireUnsealed);
+
 app.get('/system/status', async (req, res) => {
   res.json({
     initialized: await isSystemInitialized(),

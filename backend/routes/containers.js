@@ -1,9 +1,6 @@
 import express from 'express';
 import docker from '../services/docker.js';
 import { addRoute, removeRoute } from '../services/nginx.js';
-import { exec } from 'child_process';
-import util from 'util';
-const execAsync = util.promisify(exec);
 import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig } from '../services/db.js';
 import { v4 as uuidv4 } from 'uuid';
 

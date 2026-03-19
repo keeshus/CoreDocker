@@ -91,7 +91,11 @@ export const unsealNode = async (password) => {
 };
 
 const encrypt = (text) => {
-  if (!inMemoryDEK) throw new Error('Node is sealed');
+  if (!inMemoryDEK) {
+    const err = new Error('Node is sealed');
+    err.statusCode = 423;
+    throw err;
+  }
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-cbc', inMemoryDEK, iv);
   let encrypted = cipher.update(text);
@@ -100,7 +104,11 @@ const encrypt = (text) => {
 };
 
 const decrypt = (text) => {
-  if (!inMemoryDEK) throw new Error('Node is sealed');
+  if (!inMemoryDEK) {
+    const err = new Error('Node is sealed');
+    err.statusCode = 423;
+    throw err;
+  }
   const textParts = text.split(':');
   const iv = Buffer.from(textParts.shift(), 'hex');
   const encryptedText = Buffer.from(textParts.join(':'), 'hex');

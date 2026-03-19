@@ -33,7 +33,11 @@ let nodeLease = null;
 
 export const registerLocalNode = async (nodeId, name, ip) => {
   if (nodeLease) {
-    try { await nodeLease.revoke(); } catch (e) {}
+    try {
+      await nodeLease.revoke();
+    } catch (e) {
+      console.warn(`[DB] Failed to revoke previous lease for Node ${nodeId}: ${e.message}`);
+    }
   }
   
   nodeLease = etcd.lease(10); // 10 second TTL

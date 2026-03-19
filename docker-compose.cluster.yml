@@ -34,7 +34,6 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       - DOCKER_HOST=tcp://dind-node1:2375
-      - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
       - ETCD_HOSTS=http://etcd:2379
       - NODE_ID=node-1
       - NODE_NAME=node-1
@@ -92,7 +91,6 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       - DOCKER_HOST=tcp://dind-node2:2375
-      - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
       - ETCD_HOSTS=http://etcd:2379
       - NODE_ID=node-2
       - NODE_NAME=node-2
@@ -149,7 +147,6 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       - DOCKER_HOST=tcp://dind-node3:2375
-      - SECRET_MANAGER_KEY=6a656d6f6564657269736c656c696a6b656e67616172832746ab37e98f81a3f1
       - ETCD_HOSTS=http://etcd:2379
       - NODE_ID=node-3
       - NODE_NAME=node-3
