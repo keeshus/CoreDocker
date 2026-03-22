@@ -10,6 +10,7 @@ import nodeRoutes from './routes/nodes.js';
 import secretRoutes from './routes/secrets.js';
 import taskRoutes from './routes/tasks.js';
 import settingsRoutes from './routes/settings.js';
+import groupRoutes from './routes/groups.js';
 import { reconcileContainers } from './services/reconciler.js';
 import { bootstrapEtcd } from './services/etcd-cluster.js';
 import { waitForEtcd } from './services/db.js';
@@ -24,7 +25,8 @@ import {
   initializeSystem, 
   unsealNode,
   changeMasterPassword,
-  rotateDEK
+  rotateDEK,
+  verifyClusterToken,
 } from './services/secrets.js';
 
 const app = express();
@@ -68,6 +70,19 @@ const bootCluster = async (nodeId) => {
 // Auth Middleware
 const requireAuth = (req, res, next) => {
   const token = req.cookies.token;
+  const authHeader = req.headers.authorization;
+
+  // Check for cluster token first
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const clusterToken = authHeader.split(' ')[1];
+    try {
+      req.clusterNode = verifyClusterToken(clusterToken);
+      return next();
+    } catch (err) {
+      // Fall through to regular cookie check
+    }
+  }
+
   if (!token) return res.status(401).json({ error: 'Authentication required' });
 
   try {
@@ -76,6 +91,21 @@ const requireAuth = (req, res, next) => {
     next();
   } catch (err) {
     res.status(401).json({ error: 'Invalid or expired session' });
+  }
+};
+
+// Cluster Auth Middleware
+const requireClusterAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Cluster authentication required' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    req.clusterNode = verifyClusterToken(token);
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid cluster token' });
   }
 };
 
@@ -100,6 +130,7 @@ app.use('/nodes', requireAuth, nodeRoutes);
 app.use('/secrets', requireAuth, requireUnsealed, secretRoutes);
 app.use('/tasks', requireAuth, requireUnsealed, taskRoutes);
 app.use('/settings', requireAuth, settingsRoutes);
+app.use('/groups', requireAuth, groupRoutes);
 
 // Unseal/Setup Routes
 app.get('/system/status', async (req, res) => {

@@ -2,7 +2,8 @@ import express from 'express';
 import docker from '../services/docker.js';
 import etcd from '../services/db.js';
 import { addRoute, removeRoute } from '../services/nginx.js';
-import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig } from '../services/db.js';
+import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig, getContainers, getNodes } from '../services/db.js';
+import { generateClusterToken } from '../services/secrets.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
@@ -105,9 +106,27 @@ const ensureNetworkConnections = async (group, containerId) => {
 router.post('/', async (req, res) => {
   try {
     const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
+    
+    const nodeId = req.body.current_node || process.env.NODE_ID || 'master';
+
+    if (nodeId !== (process.env.NODE_ID || 'master')) {
+      // Proxy to remote node
+      const nodes = await getNodes();
+      const node = nodes.find(n => n.id === nodeId);
+      if (node) {
+        const token = generateClusterToken({ node: process.env.NODE_ID });
+        const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/containers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(req.body)
+        });
+        if (resp.ok) return res.status(201).json(await resp.json());
+        const err = await resp.json();
+        return res.status(resp.status).json(err);
+      }
+    }
 
     const containerId = uuidv4();
-    const nodeId = req.body.current_node || process.env.NODE_ID || 'master'; 
     const config = { 
       image, name, env, volumes, ports, restartPolicy, resources, proxy, group, 
       ha, ha_allowed_nodes: req.body.ha_allowed_nodes || [],
@@ -159,10 +178,34 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
+    const id = req.params.id;
     const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
     
+    // Check if remote
+    let dbC = await etcd.get(`core/containers/${id}`);
+    if (!dbC) {
+      const all = await getContainers();
+      dbC = all.find(c => c.docker_id === id);
+    }
+
+    if (dbC && dbC.current_node && dbC.current_node !== (process.env.NODE_ID || 'master')) {
+      const nodes = await getNodes();
+      const node = nodes.find(n => n.id === dbC.current_node);
+      if (node) {
+        const token = generateClusterToken({ node: process.env.NODE_ID });
+        const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/containers/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(req.body)
+        });
+        if (resp.ok) return res.json(await resp.json());
+        const err = await resp.json();
+        return res.status(resp.status).json(err);
+      }
+    }
+
     // 1. Get the existing container and remove it
-    let container = docker.getContainer(req.params.id);
+    let container = docker.getContainer(id);
     let inspect;
     try {
       inspect = await container.inspect();
@@ -350,14 +393,38 @@ router.post('/:id/persist', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const container = docker.getContainer(req.params.id);
+    const id = req.params.id;
+    // Check if this is a docker ID or our DB ID
+    let dbContainer = await etcd.get(`core/containers/${id}`);
+    if (!dbContainer) {
+      // Try searching by docker_id
+      const all = await getContainers();
+      dbContainer = all.find(c => c.docker_id === id);
+    }
+
+    if (dbContainer && dbContainer.current_node && dbContainer.current_node !== (process.env.NODE_ID || 'master')) {
+      // Proxy to remote node
+      const nodes = await getNodes();
+      const node = nodes.find(n => n.id === dbContainer.current_node);
+      if (node) {
+        const token = generateClusterToken({ node: process.env.NODE_ID });
+        const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/containers/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (resp.ok) return res.json(await resp.json());
+        const err = await resp.json();
+        return res.status(resp.status).json(err);
+      }
+    }
+
+    const container = docker.getContainer(id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, ''); // Remove leading slash
     
     await container.stop();
     await container.remove();
     
-    const dbContainer = await getContainerByName(name);
     if (dbContainer) {
       await deleteContainer(dbContainer.id);
     }
@@ -373,44 +440,118 @@ router.delete('/:id', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
-    const containers = await docker.listContainers({ all: true });
-    const enrichedContainers = await Promise.all(containers.map(async (c) => {
-      try {
-        const container = docker.getContainer(c.Id);
-        const inspect = await container.inspect();
-        const name = inspect.Name.replace(/^\//, '');
-        const dbContainer = await getContainerByName(name);
-        
-        let config = dbContainer ? dbContainer.config : null;
-
-        return { ...c, StateDetails: inspect.State, isPersisted: !!dbContainer, persistedConfig: config };
-      } catch (e) {
-        return c;
+    const dbContainers = await getContainers();
+    const localContainers = await docker.listContainers({ all: true });
+    
+    const enrichedContainers = await Promise.all(dbContainers.map(async (dbC) => {
+      let liveData = null;
+      if (dbC.current_node === (process.env.NODE_ID || 'master')) {
+        try {
+          const container = docker.getContainer(dbC.docker_id || dbC.name);
+          const inspect = await container.inspect();
+          liveData = {
+            Id: inspect.Id,
+            Names: [inspect.Name],
+            Image: inspect.Config.Image,
+            State: inspect.State.Status,
+            Status: inspect.State.Status,
+            StateDetails: inspect.State,
+            NetworkSettings: inspect.NetworkSettings
+          };
+        } catch (e) {}
       }
+
+      return {
+        Id: dbC.docker_id || dbC.id,
+        Names: [`/${dbC.name}`],
+        Image: dbC.config.image,
+        State: liveData?.State || 'unknown',
+        Status: liveData?.Status || 'Remote/Unknown',
+        StateDetails: liveData?.StateDetails,
+        NetworkSettings: liveData?.NetworkSettings || { Networks: {} },
+        isPersisted: true,
+        persistedConfig: dbC.config,
+        current_node: dbC.current_node
+      };
     }));
+
+    // Also include local containers that are NOT persisted
+    for (const local of localContainers) {
+      if (!enrichedContainers.find(c => c.Id === local.Id)) {
+        enrichedContainers.push({
+          ...local,
+          isPersisted: false,
+          current_node: process.env.NODE_ID || 'master'
+        });
+      }
+    }
+
     res.json(enrichedContainers);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch containers', details: error.message });
   }
 });
 
-router.get('/:id/logs', (req, res) => {
-  const containerId = req.params.id;
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+router.get('/:id/logs', async (req, res) => {
+  const id = req.params.id;
+  try {
+    // Check if remote
+    let dbC = await etcd.get(`core/containers/${id}`);
+    if (!dbC) {
+      const all = await getContainers();
+      dbC = all.find(c => c.docker_id === id);
+    }
 
-  const container = docker.getContainer(containerId);
-  container.logs({ follow: true, stdout: true, stderr: true, tail: 100 }, (err, stream) => {
-    if (err) return res.end();
-    stream.on('data', (chunk) => {
-      const cleanLine = chunk.toString('utf8', 8);
-      res.write(`data: ${JSON.stringify({ log: cleanLine })}\n\n`);
+    if (dbC && dbC.current_node && dbC.current_node !== (process.env.NODE_ID || 'master')) {
+      const nodes = await getNodes();
+      const node = nodes.find(n => n.id === dbC.current_node);
+      if (node) {
+        const token = generateClusterToken({ node: process.env.NODE_ID });
+        // Forward logs request
+        const url = `http://${node.ip}:${process.env.PORT || 3000}/containers/${id}/logs`;
+        const resp = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        
+        if (!resp.body) return res.end();
+        const reader = resp.body.getReader();
+        const stream = new ReadableStream({
+          async start(controller) {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              res.write(value);
+            }
+            res.end();
+          }
+        });
+        return;
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const container = docker.getContainer(id);
+    container.logs({ follow: true, stdout: true, stderr: true, tail: 100 }, (err, stream) => {
+      if (err) return res.end();
+      stream.on('data', (chunk) => {
+        const cleanLine = chunk.toString('utf8', 8);
+        res.write(`data: ${JSON.stringify({ log: cleanLine })}\n\n`);
+      });
+      req.on('close', () => stream.destroy && stream.destroy());
     });
-    req.on('close', () => stream.destroy && stream.destroy());
-  });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

@@ -1,5 +1,6 @@
 import etcd from './db.js';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 
 const SECRETS_PREFIX = 'secrets/';
 const MASTER_KEY_HASH_KEY = 'system/master_hash';
@@ -88,6 +89,22 @@ export const unsealNode = async (password) => {
 
   inMemoryDEK = dek;
   console.log('[Secrets] Node successfully unsealed.');
+};
+
+/**
+ * Generate a short-lived cluster token signed with the in-memory DEK
+ */
+export const generateClusterToken = (payload = {}) => {
+  if (!inMemoryDEK) throw new Error('Node is sealed');
+  return jwt.sign(payload, inMemoryDEK.toString('hex'), { expiresIn: '1m' });
+};
+
+/**
+ * Verify a cluster token using the in-memory DEK
+ */
+export const verifyClusterToken = (token) => {
+  if (!inMemoryDEK) throw new Error('Node is sealed');
+  return jwt.verify(token, inMemoryDEK.toString('hex'));
 };
 
 export const encrypt = (text) => {

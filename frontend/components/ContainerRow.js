@@ -52,6 +52,9 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle, o
             {container.State}
           </span>
         </td>
+        <td style={{ padding: '12px 10px', fontSize: '0.85em', color: '#64748b' }}>
+          {container.current_node || 'master'}
+        </td>
         <td style={{ padding: '12px 10px', fontFamily: 'monospace' }}>
           {container.State === 'running' ? calculateCPU(stats?.cpu) : '-'}
         </td>
@@ -62,7 +65,7 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle, o
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan="6" style={{ padding: '15px', background: '#f8fafc' }}>
+          <td colSpan="7" style={{ padding: '15px', background: '#f8fafc' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px' }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>

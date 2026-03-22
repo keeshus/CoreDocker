@@ -80,6 +80,7 @@ export const waitForEtcd = async (retries = 60, delay = 2000) => {
 
 const PREFIX = 'core/containers/';
 const NODE_PREFIX = 'nodes/';
+const GROUPS_PREFIX = 'core/groups/';
 
 let nodeLease = null;
 
@@ -183,6 +184,20 @@ export const updateContainerStatus = async (id, status) => {
 
 export const deleteContainer = async (id) => {
   await db.delete(`${PREFIX}${id}`);
+};
+
+export const getGroups = async () => {
+  const allGroups = await db.getAll(GROUPS_PREFIX);
+  return Object.values(allGroups);
+};
+
+export const saveGroup = async (id, name, config) => {
+  const group = { id, name, config };
+  await db.put(`${GROUPS_PREFIX}${id}`, group);
+};
+
+export const deleteGroup = async (id) => {
+  await db.delete(`${GROUPS_PREFIX}${id}`);
 };
 
 export default etcd;

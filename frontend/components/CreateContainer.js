@@ -4,7 +4,8 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
   const [isOpen, setIsOpen] = useState(isOpenMode);
   const [loading, setLoading] = useState(false);
   const [secrets, setSecrets] = useState([]);
-  
+  const [groups, setGroups] = useState([]);
+  const [nodes, setNodes] = useState([]);
   const defaultFormData = {
     name: '',
     image: '',
@@ -21,7 +22,8 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     stopGracePeriod: '',
     shmSize: '',
     devices: '',
-    privileged: false
+    privileged: false,
+    current_node: ''
   };
 
   const [formData, setFormData] = useState(defaultFormData);
@@ -31,6 +33,15 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
       .then(res => res.json())
       .then(data => setSecrets(data || []))
       .catch(err => console.error('Failed to fetch secrets:', err));
+    fetch('/api/groups')
+      .then(res => res.json())
+      .then(data => setGroups(data || []))
+      .catch(err => console.error('Failed to fetch groups:', err));
+
+    fetch('/api/nodes')
+      .then(res => res.json())
+      .then(data => setNodes(data || []))
+      .catch(err => console.error('Failed to fetch nodes:', err));
   }, []);
 
   useEffect(() => {
@@ -313,13 +324,16 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                 <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                     <span style={{ fontWeight: 'bold', color: '#475569' }}>Group Name</span>
-                    <input 
-                      type="text" 
-                      value={formData.group || ''} 
-                      onChange={e => setFormData({...formData, group: e.target.value})} 
-                      placeholder="e.g. web-stack (Leave empty for no group)"
+                    <select
+                      value={formData.group || ''}
+                      onChange={e => setFormData({...formData, group: e.target.value})}
                       style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-                    />
+                    >
+                      <option value="">-- No Group --</option>
+                      {groups.map(g => (
+                        <option key={g.id} value={g.name}>{g.name}</option>
+                      ))}
+                    </select>
                     <small style={{ color: '#64748b' }}>Containers with the same group name are linked in an isolated network.</small>
                   </label>
                   
@@ -332,6 +346,26 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                     <span style={{ fontWeight: 'bold', color: '#475569' }}>High Availability (HA) Failover</span>
                   </label>
                   <small style={{ color: '#64748b', marginLeft: '25px' }}>If enabled, this container group will automatically fail over to a healthy node if its current host fails.</small>
+                </div>
+              </details>
+
+              <details>
+                <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Target Node</summary>
+                <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <span style={{ fontWeight: 'bold', color: '#475569' }}>Run on Node</span>
+                    <select
+                      value={formData.current_node || ''}
+                      onChange={e => setFormData({...formData, current_node: e.target.value})}
+                      style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                    >
+                      <option value="">-- Local Node (Auto) --</option>
+                      {nodes.map(n => (
+                        <option key={n.id} value={n.id}>{n.name} ({n.ip})</option>
+                      ))}
+                    </select>
+                    <small style={{ color: '#64748b' }}>Select the specific node to deploy this container to.</small>
+                  </label>
                 </div>
               </details>
 

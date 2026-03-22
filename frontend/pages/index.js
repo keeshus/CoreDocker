@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import ContainerRow from '../components/ContainerRow';
+import CreateGroup from '../components/CreateGroup';
 import NodesTab from '../components/NodesTab';
 import SecretsTab from '../components/SecretsTab';
 import TasksTab from '../components/TasksTab';
@@ -10,6 +11,7 @@ import UnsealView from '../components/UnsealView';
 export default function Home() {
   const [activeTab, setActiveTab] = useState('containers');
   const [containers, setContainers] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [info, setInfo] = useState(null);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -21,8 +23,9 @@ export default function Home() {
 
   const refreshData = async () => {
     try {
-      const [containersRes, infoRes, statusRes] = await Promise.all([
+      const [containersRes, groupsRes, infoRes, statusRes] = await Promise.all([
         fetch('/api/containers'),
+        fetch('/api/groups'),
         fetch('/api/info'),
         fetch('/api/system/status')
       ]);
@@ -34,6 +37,7 @@ export default function Home() {
       }
 
       if (containersRes.ok) setContainers(await containersRes.json());
+      if (groupsRes.ok) setGroups(await groupsRes.json());
       if (infoRes.ok) setInfo(await infoRes.json());
     } catch (err) {
       console.error('Refresh error:', err);
@@ -171,33 +175,61 @@ export default function Home() {
             </section>
           </div>
 
-          <section>
-            <h2 style={{ fontSize: '1.5em' }}>Containers</h2>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
-                  <th style={{ padding: '12px 10px' }}>Name</th>
-                  <th style={{ padding: '12px 10px' }}>Image</th>
-                  <th style={{ padding: '12px 10px' }}>State</th>
-                  <th style={{ padding: '12px 10px' }}>CPU %</th>
-                  <th style={{ padding: '12px 10px' }}>Memory</th>
-                  <th style={{ padding: '12px 10px' }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {containers.filter(c => !c.Names[0].startsWith('/core-docker-')).map(c => (
-                  <ContainerRow
-                    key={c.Id} container={c} stats={stats[c.Id]}
-                    isExpanded={expandedContainer === c.Id} 
-                    onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)}
-                    onEdit={handleEdit}
-                    onPersist={handlePersist}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+            <CreateContainer onCreated={refreshData} />
+            <CreateGroup onCreated={refreshData} />
+          </div>
+
+          {[...groups, { id: 'ungrouped', name: 'Ungrouped' }].map(group => {
+            const groupContainers = containers.filter(c => {
+              if (c.Names[0].startsWith('/core-docker-')) return false;
+              if (group.id === 'ungrouped') return !c.persistedConfig?.group || !groups.find(g => g.name === c.persistedConfig.group);
+              return c.persistedConfig?.group === group.name;
+            });
+
+            if (groupContainers.length === 0 && group.id === 'ungrouped') return null;
+
+            return (
+              <section key={group.id} style={{ marginBottom: '40px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                <div style={{ padding: '15px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.2em', color: '#1e293b' }}>{group.name}</h3>
+                  <span style={{ fontSize: '0.85em', color: '#64748b' }}>{groupContainers.length} Container(s)</span>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.85em', background: '#fcfcfc' }}>
+                      <th style={{ padding: '10px 20px' }}>Name</th>
+                      <th style={{ padding: '10px 20px' }}>Image</th>
+                      <th style={{ padding: '10px 20px' }}>State</th>
+                      <th style={{ padding: '10px 20px' }}>Node</th>
+                      <th style={{ padding: '10px 20px' }}>CPU %</th>
+                      <th style={{ padding: '10px 20px' }}>Memory</th>
+                      <th style={{ padding: '10px 20px' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groupContainers.map(c => (
+                      <ContainerRow
+                        key={c.Id} container={c} stats={stats[c.Id]}
+                        isExpanded={expandedContainer === c.Id}
+                        onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)}
+                        onEdit={handleEdit}
+                        onPersist={handlePersist}
+                        onDelete={handleDelete}
+                      />
+                    ))}
+                    {groupContainers.length === 0 && (
+                      <tr>
+                        <td colSpan="7" style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '0.9em' }}>
+                          No containers in this group.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </section>
+            );
+          })}
 
           {editingContainer && (
             <CreateContainer 
