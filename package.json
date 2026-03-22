@@ -9,20 +9,20 @@
     "frontend:start": "next start frontend"
   },
   "dependencies": {
-    "dockerode": "latest",
-    "etcd3": "latest",
-    "express": "latest",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "lucide-react": "latest",
-    "uuid": "latest",
-    "helmet": "latest",
-    "cookie-parser": "latest",
-    "jsonwebtoken": "latest"
+    "dockerode": "^4.0.10",
+    "etcd3": "^1.1.2",
+    "express": "^5.2.1",
+    "next": "^16.2.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "lucide-react": "^0.577.0",
+    "uuid": "^13.0.0",
+    "helmet": "^8.1.0",
+    "cookie-parser": "^1.4.7",
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
-    "nodemon": "latest"
+    "nodemon": "^3.1.14"
   },
   "type": "module"
 }
