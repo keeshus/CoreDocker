@@ -1,7 +1,7 @@
 import docker from './docker.js';
 import { getContainers, updateContainerDockerId, getLocalNodeConfig, getNodes } from './db.js';
-import { getSecret } from './secrets.js';
 import { addRoute } from './nginx.js';
+import { buildCreateOpts } from '../utils/docker-opts.js';
 import etcd from './db.js';
 import fs from 'fs';
 import path from 'path';
@@ -217,62 +217,8 @@ export const reconcileContainers = async (localNodeId) => {
         console.log(`[Reconciler] Container ${name} missing on this host, creating...`);
         await ensureImage(config.image);
 
-        const PortBindings = {};
-        const ExposedPorts = {};
-        (config.ports || []).forEach(p => {
-          const cPort = `${p.container}/tcp`;
-          ExposedPorts[cPort] = {};
-          if (!PortBindings[cPort]) PortBindings[cPort] = [];
-          PortBindings[cPort].push({
-            HostIp: p.ip || '',
-            HostPort: p.host ? p.host.toString() : ''
-          });
-        });
-
-        const localNodeConfig = await getLocalNodeConfig();
-        const binds = (config.volumes || []).map(v => {
-          let hostPath = v.host;
-          if (v.type === 'backup' || v.type === 'non-backup') {
-            const basePath = v.type === 'backup' ? localNodeConfig.backupPath : localNodeConfig.nonBackupPath;
-            const folderName = v.host ? `/${v.host}` : '';
-            const safeContainerPath = v.container.replace(/^\//, '').replace(/\//g, '_');
-            hostPath = `${basePath}/${name}${folderName ? folderName : '/' + safeContainerPath}`;
-          }
-          return `${hostPath}:${v.container}`;
-        });
-
-        const env = [];
-        for (const e of (config.env || [])) {
-          let val = e.value;
-          const secretMatch = val.match(/^\{\{SECRET:(.+)\}\}$/);
-          if (secretMatch) {
-            const secretKey = secretMatch[1];
-            const plaintext = await getSecret(secretKey);
-            if (plaintext === null) {
-              console.error(`[Reconciler] Secret ${secretKey} not found for container ${name}. Failing creation.`);
-              throw new Error(`Secret ${secretKey} not found`);
-            }
-            val = plaintext;
-          }
-          env.push(`${e.key}=${val}`);
-        }
-
-        const createOpts = {
-          Image: config.image,
-          name: name,
-          Env: env,
-          ExposedPorts,
-          HostConfig: {
-            RestartPolicy: { Name: config.restartPolicy || 'unless-stopped' },
-            Binds: binds,
-            PortBindings,
-            Memory: config.resources?.memory ? config.resources.memory * 1024 * 1024 : 0,
-            NanoCPUs: config.resources?.cpu ? config.resources.cpu * 1000000000 : 0,
-            NetworkMode: 'web-proxy'
-          }
-        };
-
         try {
+          const createOpts = await buildCreateOpts(name, config.image, config.env, config.volumes, config.ports, config.restartPolicy, config.resources, config);
           container = await docker.createContainer(createOpts);
           if (config.group) {
             const networkName = `group-${config.group}`;

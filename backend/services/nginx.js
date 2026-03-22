@@ -7,12 +7,28 @@ const NGINX_LOCATIONS_DIR = path.join(NGINX_CONF_DIR, 'locations');
 const NGINX_SSL_DIR = process.env.NODE_ENV === 'development' ? path.join(process.cwd(), 'nginx', 'ssl') : '/app/nginx/ssl';
 
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
+    // Validation
+    const domainRegex = /^[a-zA-Z0-9.-]+$/;
+    const uriRegex = /^\/[a-zA-Z0-9._\-\/]*$/;
+    const portRegex = /^\d+$/;
+
+    if (domain && !domainRegex.test(domain)) {
+        throw new Error('Invalid domain format');
+    }
+
+    const uriPath = uri.startsWith('/') ? uri : `/${uri}`;
+    if (!uriRegex.test(uriPath)) {
+        throw new Error('Invalid URI format');
+    }
+
+    if (!portRegex.test(port.toString())) {
+        throw new Error('Invalid port format');
+    }
+
     // Ensure directories exist
     await fs.mkdir(NGINX_LOCATIONS_DIR, { recursive: true });
     await fs.mkdir(NGINX_SSL_DIR, { recursive: true });
 
-    const uriPath = uri.startsWith('/') ? uri : `/${uri}`;
-    
     if (domain && sslCert && sslKey) {
         // Domain specific configuration with SSL
         const certPath = path.join(NGINX_SSL_DIR, `${containerName}.crt`);

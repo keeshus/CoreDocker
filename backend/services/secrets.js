@@ -228,25 +228,37 @@ export const rotateDEK = async (masterPassword) => {
   const newDEK = crypto.randomBytes(32);
 
   // 4. Re-encrypt all data
-  const transaction = etcd.transaction();
-  
+  // We don't use a single transaction because it might exceed ETCD request size limit
+  const results = {
+    success: 0,
+    failed: 0,
+    errors: []
+  };
+
   for (const [key, value] of Object.entries(allCoreData)) {
-    // Decrypt with old DEK
-    const textParts = value.split(':');
-    const ivOld = Buffer.from(textParts.shift(), 'hex');
-    const encryptedOld = Buffer.from(textParts.join(':'), 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', oldDEK, ivOld);
-    let decrypted = decipher.update(encryptedOld);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    try {
+      // Decrypt with old DEK
+      const textParts = value.split(':');
+      const ivOld = Buffer.from(textParts.shift(), 'hex');
+      const encryptedOld = Buffer.from(textParts.join(':'), 'hex');
+      const decipher = crypto.createDecipheriv('aes-256-cbc', oldDEK, ivOld);
+      let decrypted = decipher.update(encryptedOld);
+      decrypted = Buffer.concat([decrypted, decipher.final()]);
 
-    // Encrypt with new DEK
-    const ivNew = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-cbc', newDEK, ivNew);
-    let encryptedNew = cipher.update(decrypted);
-    encryptedNew = Buffer.concat([encryptedNew, cipher.final()]);
-    const newValue = ivNew.toString('hex') + ':' + encryptedNew.toString('hex');
+      // Encrypt with new DEK
+      const ivNew = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', newDEK, ivNew);
+      let encryptedNew = cipher.update(decrypted);
+      encryptedNew = Buffer.concat([encryptedNew, cipher.final()]);
+      const newValue = ivNew.toString('hex') + ':' + encryptedNew.toString('hex');
 
-    transaction.put(key).value(newValue);
+      await etcd.put(key).value(newValue);
+      results.success++;
+    } catch (err) {
+      console.error(`[Secrets] Failed to re-encrypt key ${key}:`, err.message);
+      results.failed++;
+      results.errors.push({ key, error: err.message });
+    }
   }
 
   // 5. Re-encrypt the NEW DEK with the master password
@@ -257,13 +269,13 @@ export const rotateDEK = async (masterPassword) => {
   encryptedNewDEK = Buffer.concat([encryptedNewDEK, cipherDEK.final()]);
   const encryptedDEKPayload = ivDEK.toString('hex') + ':' + encryptedNewDEK.toString('hex');
 
-  transaction.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
+  await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
 
-  // 6. Execute rotation
-  await transaction.commit();
-
-  // 7. Update in-memory DEK
+  // 6. Update in-memory DEK
   inMemoryDEK = newDEK;
 
-  console.log('[Secrets] DEK rotation completed successfully.');
+  console.log(`[Secrets] DEK rotation completed. Success: ${results.success}, Failed: ${results.failed}`);
+  if (results.failed > 0) {
+    throw new Error(`DEK rotation partially failed. ${results.failed} keys could not be re-encrypted.`);
+  }
 };

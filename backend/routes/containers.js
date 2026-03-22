@@ -4,88 +4,57 @@ import etcd from '../services/db.js';
 import { addRoute, removeRoute } from '../services/nginx.js';
 import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig, getContainers, getNodes } from '../services/db.js';
 import { generateClusterToken } from '../services/secrets.js';
+import { buildCreateOpts } from '../utils/docker-opts.js';
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs/promises';
 
 const router = express.Router();
 
-const buildCreateOpts = async (name, image, env, volumes, ports, restartPolicy, resources, opts = {}) => {
-  const PortBindings = {};
-  const ExposedPorts = {};
-  (ports || []).forEach(p => {
-    const cPort = `${p.container}/tcp`;
-    ExposedPorts[cPort] = {};
-    if (!PortBindings[cPort]) PortBindings[cPort] = [];
-    PortBindings[cPort].push({
-      HostIp: p.ip || '',
-      HostPort: p.host ? p.host.toString() : ''
-    });
-  });
-
-  const localNode = await getLocalNodeConfig();
-  
-  const binds = (volumes || []).map(v => {
-    let hostPath = v.host;
-    if (v.type === 'backup' || v.type === 'non-backup') {
-      const basePath = v.type === 'backup' ? localNode.backupPath : localNode.nonBackupPath;
-      const folderName = v.host ? `/${v.host}` : '';
-      const safeContainerPath = v.container.replace(/^\//, '').replace(/\//g, '_');
-      hostPath = `${basePath}/${name}${folderName ? folderName : '/' + safeContainerPath}`;
-    }
-    return `${hostPath}:${v.container}`;
-  });
-
-  const createOpts = {
-    Image: image,
-    name: name,
-    Env: (env || []).map(e => `${e.key}=${e.value}`),
-    ExposedPorts,
-    HostConfig: {
-      RestartPolicy: { Name: restartPolicy },
-      Binds: binds,
-      PortBindings,
-      Memory: resources?.memory ? resources.memory * 1024 * 1024 : 0,
-      NanoCPUs: resources?.cpu ? resources.cpu * 1000000000 : 0,
-      NetworkMode: 'web-proxy',
-      Privileged: opts.privileged || false,
-    }
-  };
-
-  if (opts.stopGracePeriod) {
-    createOpts.StopTimeout = parseInt(opts.stopGracePeriod, 10);
-  }
-
-  if (opts.tmpfs) {
-    const tmpfsObj = {};
-    opts.tmpfs.split(',').forEach(p => {
-      if (p.trim()) tmpfsObj[p.trim()] = '';
-    });
-    createOpts.HostConfig.Tmpfs = tmpfsObj;
-  }
-
-  if (opts.shmSize) {
-    // E.g. "64m" or "1g" or bytes
-    let bytes = 0;
-    const str = opts.shmSize.toLowerCase().trim();
-    if (str.endsWith('g')) bytes = parseInt(str) * 1024 * 1024 * 1024;
-    else if (str.endsWith('m')) bytes = parseInt(str) * 1024 * 1024;
-    else if (str.endsWith('k')) bytes = parseInt(str) * 1024;
-    else bytes = parseInt(str) || 0;
-    if (bytes > 0) createOpts.HostConfig.ShmSize = bytes;
-  }
-
-  if (opts.devices) {
-    createOpts.HostConfig.Devices = opts.devices.split(',').map(d => {
-      const [pathOnHost, pathInContainer, cgroupPermissions] = d.trim().split(':');
-      if (!pathOnHost) return null;
-      return {
-        PathOnHost: pathOnHost,
-        PathInContainer: pathInContainer || pathOnHost,
-        CgroupPermissions: cgroupPermissions || 'rwm'
+const proxyToNode = async (nodeId, req, res) => {
+  const targetNodeId = nodeId || 'master';
+  if (targetNodeId !== (process.env.NODE_ID || 'master')) {
+    const nodes = await getNodes();
+    const node = nodes.find(n => n.id === targetNodeId);
+    if (node) {
+      const token = generateClusterToken({ node: process.env.NODE_ID });
+      const url = `http://${node.ip}:${process.env.PORT || 3000}${req.originalUrl}`;
+      
+      const options = {
+        method: req.method,
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${token}` 
+        }
       };
-    }).filter(Boolean);
-  }
 
-  return createOpts;
+      if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        options.body = JSON.stringify(req.body);
+      }
+
+      const resp = await fetch(url, options);
+
+      // Handle stream for logs
+      if (req.path.endsWith('/logs') && resp.ok) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+
+        if (!resp.body) return res.end();
+        const reader = resp.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        return res.end();
+      }
+
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    }
+  }
+  return false;
 };
 
 const ensureNetworkConnections = async (group, containerId) => {
@@ -109,22 +78,8 @@ router.post('/', async (req, res) => {
     
     const nodeId = req.body.current_node || process.env.NODE_ID || 'master';
 
-    if (nodeId !== (process.env.NODE_ID || 'master')) {
-      // Proxy to remote node
-      const nodes = await getNodes();
-      const node = nodes.find(n => n.id === nodeId);
-      if (node) {
-        const token = generateClusterToken({ node: process.env.NODE_ID });
-        const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/containers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify(req.body)
-        });
-        if (resp.ok) return res.status(201).json(await resp.json());
-        const err = await resp.json();
-        return res.status(resp.status).json(err);
-      }
-    }
+    const proxied = await proxyToNode(nodeId, req, res);
+    if (proxied !== false) return;
 
     const containerId = uuidv4();
     const config = { 
@@ -188,21 +143,8 @@ router.put('/:id', async (req, res) => {
       dbC = all.find(c => c.docker_id === id);
     }
 
-    if (dbC && dbC.current_node && dbC.current_node !== (process.env.NODE_ID || 'master')) {
-      const nodes = await getNodes();
-      const node = nodes.find(n => n.id === dbC.current_node);
-      if (node) {
-        const token = generateClusterToken({ node: process.env.NODE_ID });
-        const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/containers/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify(req.body)
-        });
-        if (resp.ok) return res.json(await resp.json());
-        const err = await resp.json();
-        return res.status(resp.status).json(err);
-      }
-    }
+    const proxied = await proxyToNode(dbC?.current_node, req, res);
+    if (proxied !== false) return;
 
     // 1. Get the existing container and remove it
     let container = docker.getContainer(id);
@@ -305,7 +247,8 @@ router.post('/:id/persist', async (req, res) => {
         
         console.log(`Migrating volume ${oldHost} -> ${newHostPath}`);
         try {
-          await execAsync(`mkdir -p "${newHostPath}" && cp -R "${oldHost}"/* "${newHostPath}"/ || true`);
+          await fs.mkdir(newHostPath, { recursive: true });
+          await fs.cp(oldHost, newHostPath, { recursive: true });
         } catch(e) {
           console.error(`Error copying volume ${oldHost}:`, e);
         }
@@ -323,7 +266,8 @@ router.post('/:id/persist', async (req, res) => {
           
           console.log(`Migrating docker volume ${m.Source} -> ${newHostPath}`);
           try {
-            await execAsync(`mkdir -p "${newHostPath}" && cp -R "${m.Source}"/* "${newHostPath}"/ || true`);
+            await fs.mkdir(newHostPath, { recursive: true });
+            await fs.cp(m.Source, newHostPath, { recursive: true });
           } catch(e) {
             console.error(`Error copying volume ${m.Source}:`, e);
           }
@@ -402,21 +346,8 @@ router.delete('/:id', async (req, res) => {
       dbContainer = all.find(c => c.docker_id === id);
     }
 
-    if (dbContainer && dbContainer.current_node && dbContainer.current_node !== (process.env.NODE_ID || 'master')) {
-      // Proxy to remote node
-      const nodes = await getNodes();
-      const node = nodes.find(n => n.id === dbContainer.current_node);
-      if (node) {
-        const token = generateClusterToken({ node: process.env.NODE_ID });
-        const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/containers/${id}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (resp.ok) return res.json(await resp.json());
-        const err = await resp.json();
-        return res.status(resp.status).json(err);
-      }
-    }
+    const proxied = await proxyToNode(dbContainer?.current_node, req, res);
+    if (proxied !== false) return;
 
     const container = docker.getContainer(id);
     const inspect = await container.inspect();
@@ -502,37 +433,8 @@ router.get('/:id/logs', async (req, res) => {
       dbC = all.find(c => c.docker_id === id);
     }
 
-    if (dbC && dbC.current_node && dbC.current_node !== (process.env.NODE_ID || 'master')) {
-      const nodes = await getNodes();
-      const node = nodes.find(n => n.id === dbC.current_node);
-      if (node) {
-        const token = generateClusterToken({ node: process.env.NODE_ID });
-        // Forward logs request
-        const url = `http://${node.ip}:${process.env.PORT || 3000}/containers/${id}/logs`;
-        const resp = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        
-        if (!resp.body) return res.end();
-        const reader = resp.body.getReader();
-        const stream = new ReadableStream({
-          async start(controller) {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              res.write(value);
-            }
-            res.end();
-          }
-        });
-        return;
-      }
-    }
+    const proxied = await proxyToNode(dbC?.current_node, req, res);
+    if (proxied !== false) return;
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
