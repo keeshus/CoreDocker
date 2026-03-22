@@ -1,5 +1,4 @@
 import React from 'react';
-import CreateContainer from './CreateContainer';
 
 export default function AppLayout({ children, activeTab, setActiveTab, info, onRefresh }) {
   return (
@@ -31,7 +30,6 @@ export default function AppLayout({ children, activeTab, setActiveTab, info, onR
             >
               Logout
             </button>
-            <CreateContainer onCreated={onRefresh} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>

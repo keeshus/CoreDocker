@@ -7,6 +7,7 @@ import TasksTab from '../components/TasksTab';
 import SettingsTab from '../components/SettingsTab';
 import AppLayout from '../components/AppLayout';
 import UnsealView from '../components/UnsealView';
+import CreateContainer from '../components/CreateContainer';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('containers');
