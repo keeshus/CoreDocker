@@ -1,17 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import ContainerRow from './ContainerRow';
+import { Settings, Plus, Trash2 } from 'lucide-react';
 
-export default function SettingsTab({ systemContainers = [], stats = {} }) {
+export default function ClusterSettings() {
   const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '', dnsVip: '' });
-  const [expandedContainer, setExpandedContainer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Cluster Nodes State
+  const [nodes, setNodes] = useState([]);
+  const [newNodeName, setNewNodeName] = useState('');
+  const [newNodeIp, setNewNodeIp] = useState('');
+  const [newBackupPath, setNewBackupPath] = useState('/data/backup');
+  const [newNonBackupPath, setNewNonBackupPath] = useState('/data/non-backup');
+  const [loadingNodes, setLoadingNodes] = useState(true);
+
   // Security Form State
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
-  const [rotationPassword, setRotationPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
+
+  const fetchNodes = async () => {
+    try {
+      const res = await fetch('/api/nodes');
+      const data = await res.json();
+      setNodes(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingNodes(false);
+    }
+  };
 
   useEffect(() => {
     fetch('/api/settings')
@@ -26,6 +44,7 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
         console.error('Failed to load settings:', e);
         setLoading(false);
       });
+    fetchNodes();
   }, []);
 
   const handleSave = async (e) => {
@@ -47,6 +66,38 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
       alert('Error saving settings: ' + e.message);
     }
     setSaving(false);
+  };
+
+  const handleAddNode = async (e) => {
+    e.preventDefault();
+    if (!newNodeName || !newNodeIp) return;
+    
+    try {
+      const res = await fetch('/api/nodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newNodeName, ip: newNodeIp, backupPath: newBackupPath, nonBackupPath: newNonBackupPath }),
+      });
+      if (res.ok) {
+        setNewNodeName('');
+        setNewNodeIp('');
+        setNewBackupPath('/data/backup');
+        setNewNonBackupPath('/data/non-backup');
+        fetchNodes();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteNode = async (id) => {
+    if (!window.confirm('Are you sure you want to remove this node?')) return;
+    try {
+      const res = await fetch(`/api/nodes/${id}`, { method: 'DELETE' });
+      if (res.ok) fetchNodes();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleChangePassword = async (e) => {
@@ -106,7 +157,7 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
   return (
     <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
       <h2 style={{ marginTop: 0 }}>Cluster Settings</h2>
-      <p style={{ color: '#64748b' }}>Configure Master Node and Cluster-wide settings.</p>
+      <p style={{ color: '#64748b' }}>Configure Cluster-wide settings and manage cluster nodes.</p>
 
       <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '600px', marginTop: '20px' }}>
         <div>
@@ -150,9 +201,113 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
           disabled={saving}
           style={{ padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', width: 'fit-content' }}
         >
-          {saving ? 'Saving...' : 'Save Settings'}
+          {saving ? 'Saving...' : 'Save Cluster Settings'}
         </button>
       </form>
+
+      <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
+        <h3 style={{ marginTop: 0 }}>Cluster Nodes</h3>
+        
+        <div style={{ padding: '15px', background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+          <h4 style={{ marginTop: 0, fontSize: '1.1em', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
+            <Settings size={18} /> Register New Node
+          </h4>
+          <form onSubmit={handleAddNode} style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', alignItems: 'flex-end' }}>
+            <div style={{ flex: '1 1 200px' }}>
+              <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Node Name</label>
+              <input
+                type="text"
+                value={newNodeName}
+                onChange={e => setNewNodeName(e.target.value)}
+                placeholder="e.g. worker-01"
+                style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+                required
+              />
+            </div>
+            <div style={{ flex: '1 1 200px' }}>
+              <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>IP Address</label>
+              <input
+                type="text"
+                value={newNodeIp}
+                onChange={e => setNewNodeIp(e.target.value)}
+                placeholder="e.g. 192.168.1.100"
+                style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              style={{
+                background: '#3b82f6', color: 'white', border: 'none', padding: '10px 20px',
+                borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px'
+              }}
+            >
+              <Plus size={18} /> Add Node
+            </button>
+          </form>
+        </div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em', background: '#f8fafc' }}>
+              <th style={{ padding: '12px 10px' }}>Name</th>
+              <th style={{ padding: '12px 10px' }}>IP Address</th>
+              <th style={{ padding: '12px 10px' }}>Status</th>
+              <th style={{ padding: '12px 10px' }}>Security</th>
+              <th style={{ padding: '12px 10px', textAlign: 'right' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loadingNodes ? (
+              <tr><td colSpan="5" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>Loading nodes...</td></tr>
+            ) : nodes.length === 0 ? (
+              <tr><td colSpan="5" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No nodes registered.</td></tr>
+            ) : nodes.map(node => (
+              <tr key={node.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>{node.name}</td>
+                <td style={{ padding: '15px 10px', color: '#64748b' }}>{node.ip}</td>
+                <td style={{ padding: '15px 10px' }}>
+                  <span style={{
+                    display: 'inline-block', padding: '4px 8px', borderRadius: '12px', fontSize: '0.8em', fontWeight: 'bold',
+                    background: node.status === 'online' ? '#d1fae5' : '#fee2e2',
+                    color: node.status === 'online' ? '#059669' : '#dc2626'
+                  }}>
+                    {node.status.toUpperCase()}
+                  </span>
+                </td>
+                <td style={{ padding: '15px 10px' }}>
+                  {node.unsealed ? (
+                    <span style={{ color: '#059669', fontSize: '0.9em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      🔓 Unsealed
+                    </span>
+                  ) : (
+                    <a
+                      href={`http://${node.id}.core-docker.local`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: '#3b82f6', fontSize: '0.9em', textDecoration: 'none',
+                        display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold'
+                      }}
+                    >
+                      🔒 Sealed (Unseal)
+                    </a>
+                  )}
+                </td>
+                <td style={{ padding: '15px 10px', textAlign: 'right' }}>
+                  <button
+                    onClick={() => handleDeleteNode(node.id)}
+                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}
+                    title="Remove Node"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div style={{ marginTop: '40px', padding: '20px', background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
         <h3 style={{ marginTop: 0, color: '#1e293b' }}>Security</h3>
@@ -232,42 +387,6 @@ export default function SettingsTab({ systemContainers = [], stats = {} }) {
             </button>
           </div>
         </div>
-      </div>
-
-      <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
-        <h3 style={{ marginTop: 0 }}>System Containers</h3>
-        <p style={{ color: '#64748b', fontSize: '0.9em' }}>Monitor core application containers here.</p>
-        
-        {systemContainers.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '15px' }}>
-            <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
-                <th style={{ padding: '12px 10px' }}>Name</th>
-                <th style={{ padding: '12px 10px' }}>Image</th>
-                <th style={{ padding: '12px 10px' }}>State</th>
-                <th style={{ padding: '12px 10px' }}>CPU %</th>
-                <th style={{ padding: '12px 10px' }}>Memory</th>
-                <th style={{ padding: '12px 10px' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {systemContainers.map(c => (
-                <ContainerRow
-                  key={c.Id}
-                  container={c}
-                  stats={stats[c.Id]}
-                  isExpanded={expandedContainer === c.Id}
-                  onToggle={() => setExpandedContainer(expandedContainer === c.Id ? null : c.Id)}
-                  onEdit={() => {}}
-                  onPersist={() => {}}
-                  isSystem={true}
-                />
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p style={{ color: '#94a3b8' }}>No system containers found.</p>
-        )}
       </div>
     </div>
   );

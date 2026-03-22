@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import ContainerRow from '../components/ContainerRow';
 import CreateGroup from '../components/CreateGroup';
-import NodesTab from '../components/NodesTab';
 import SecretsTab from '../components/SecretsTab';
 import TasksTab from '../components/TasksTab';
-import SettingsTab from '../components/SettingsTab';
+import ClusterSettings from '../components/ClusterSettings';
+import NodeSettings from '../components/NodeSettings';
 import AppLayout from '../components/AppLayout';
 import UnsealView from '../components/UnsealView';
 import CreateContainer from '../components/CreateContainer';
@@ -246,7 +246,8 @@ export default function Home() {
       {activeTab === 'nodes' && <NodesTab />}
       {activeTab === 'secrets' && <SecretsTab />}
       {activeTab === 'tasks' && <TasksTab />}
-      {activeTab === 'settings' && <SettingsTab systemContainers={containers.filter(c => c.Names[0].startsWith('/core-docker-'))} stats={stats} />}
+      {activeTab === 'cluster-settings' && <ClusterSettings />}
+      {activeTab === 'node-settings' && <NodeSettings systemContainers={containers.filter(c => c.Names[0].startsWith('/core-docker-'))} stats={stats} />}
     </AppLayout>
   );
 }

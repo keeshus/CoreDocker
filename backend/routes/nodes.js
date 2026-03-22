@@ -8,11 +8,42 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const nodes = await getNodes();
-    // Return all nodes, including those from heartbeats. 
-    // Filter out potential duplicates or offline nodes based on lastSeen if needed.
-    const now = Date.now();
-    const activeNodes = nodes.filter(n => (now - (n.lastSeen || 0)) < 30000);
-    res.json(activeNodes);
+    // Return all nodes. We trust the frontend to show status based on lastSeen.
+    // If a node was manually registered it should always show up.
+    // Heartbeat-only nodes will eventually be cleaned up by ETCD lease.
+    res.json(nodes);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/:id/settings', async (req, res) => {
+  try {
+    const nodes = await getNodes();
+    const node = nodes.find(n => n.id === req.params.id);
+    if (!node) return res.status(404).json({ error: 'Node not found' });
+    
+    res.json({
+      backupPath: node.backupPath || '/data/backup',
+      nonBackupPath: node.nonBackupPath || '/data/non-backup'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/:id/settings', async (req, res) => {
+  try {
+    const { backupPath, nonBackupPath } = req.body;
+    const nodes = await getNodes();
+    const node = nodes.find(n => n.id === req.params.id);
+    if (!node) return res.status(404).json({ error: 'Node not found' });
+
+    node.backupPath = backupPath;
+    node.nonBackupPath = nonBackupPath;
+    
+    await saveNode(node.id, node.name, node.ip, node.status, node.backupPath, node.nonBackupPath);
+    res.json(node);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

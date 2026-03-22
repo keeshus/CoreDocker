@@ -129,10 +129,15 @@ ${staticEntries}
 
     // Always ensure the config directory and file exist on the host
     const configDir = '/tmp/coredns';
+    const corefilePath = path.join(configDir, 'Corefile');
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
     }
-    fs.writeFileSync(path.join(configDir, 'Corefile'), corefile);
+    // If it exists but is a directory (docker sometimes creates it as such if mount fails)
+    if (fs.existsSync(corefilePath) && fs.lstatSync(corefilePath).isDirectory()) {
+      fs.rmdirSync(corefilePath, { recursive: true });
+    }
+    fs.writeFileSync(corefilePath, corefile);
 
     try {
       container = docker.getContainer(containerName);
@@ -175,6 +180,14 @@ ${staticEntries}
     const inspect = await container.inspect();
     if (!inspect.State.Running) {
       await container.start();
+    } else {
+      // CoreDNS supports SIGHUP to reload config.
+      try {
+        await container.kill({ signal: 'SIGHUP' });
+        console.log('[Reconciler] Sent SIGHUP to CoreDNS to reload Corefile');
+      } catch (e) {
+        console.warn(`[Reconciler] Failed to send SIGHUP to CoreDNS: ${e.message}`);
+      }
     }
   } catch (err) {
     console.error('[Reconciler] CoreDNS reconcile failed:', err.message);

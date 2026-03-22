@@ -33,7 +33,7 @@ export default function AppLayout({ children, activeTab, setActiveTab, info, onR
           </div>
         </div>
         <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-          {['containers', 'nodes', 'secrets', 'tasks', 'settings'].map(tab => (
+          {['containers', 'secrets', 'tasks', 'cluster-settings', 'node-settings'].map(tab => (
             <button 
               key={tab}
               onClick={() => setActiveTab(tab)} 
@@ -44,7 +44,7 @@ export default function AppLayout({ children, activeTab, setActiveTab, info, onR
                 textTransform: 'capitalize'
               }}
             >
-              {tab === 'nodes' ? 'Cluster Nodes' : tab === 'tasks' ? 'Scheduler & Tasks' : tab}
+              {tab === 'tasks' ? 'Scheduler & Tasks' : tab.replace('-', ' ')}
             </button>
           ))}
         </div>
