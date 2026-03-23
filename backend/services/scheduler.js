@@ -86,10 +86,20 @@ export const runTask = async (taskId) => {
   }
 };
 
+let schedulerInterval = null;
+
+export const stopScheduler = () => {
+  if (schedulerInterval) {
+    clearInterval(schedulerInterval);
+    schedulerInterval = null;
+    console.log('[Scheduler] Stopped.');
+  }
+};
+
 export const startScheduler = () => {
   console.log('[Scheduler] Started (Cron Tasks)');
   
-  setInterval(async () => {
+  schedulerInterval = setInterval(async () => {
     try {
       const tasks = await getAllTasks();
       for (const task of tasks) {

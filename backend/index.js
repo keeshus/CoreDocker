@@ -11,21 +11,20 @@ import secretRoutes from './routes/secrets.js';
 import taskRoutes from './routes/tasks.js';
 import settingsRoutes from './routes/settings.js';
 import groupRoutes from './routes/groups.js';
-import { reconcileContainers } from './services/reconciler.js';
-import { bootstrapEtcd } from './services/etcd-cluster.js';
-import { waitForEtcd } from './services/db.js';
-import { startScheduler } from './services/scheduler.js';
-import { startOrchestrator } from './services/orchestrator.js';
+import {reconcileContainers} from './services/reconciler.js';
+import {bootstrapEtcd} from './services/etcd-cluster.js';
+import {closeEtcd, registerLocalNode, waitForEtcd} from './services/db.js';
+import {startScheduler, stopScheduler} from './services/scheduler.js';
+import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import docker from './services/docker.js';
-import { v4 as uuidv4 } from 'uuid';
-import { registerLocalNode } from './services/db.js';
-import { 
-  isSystemInitialized, 
-  isNodeUnsealed, 
-  initializeSystem, 
-  unsealNode,
+import {v4 as uuidv4} from 'uuid';
+import {
   changeMasterPassword,
+  initializeSystem,
+  isNodeUnsealed,
+  isSystemInitialized,
   rotateDEK,
+  unsealNode,
   verifyClusterToken,
 } from './services/secrets.js';
 
@@ -86,26 +85,10 @@ const requireAuth = (req, res, next) => {
   if (!token) return res.status(401).json({ error: 'Authentication required' });
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch (err) {
     res.status(401).json({ error: 'Invalid or expired session' });
-  }
-};
-
-// Cluster Auth Middleware
-const requireClusterAuth = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Cluster authentication required' });
-  }
-  const token = authHeader.split(' ')[1];
-  try {
-    req.clusterNode = verifyClusterToken(token);
-    next();
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid cluster token' });
   }
 };
 
@@ -228,12 +211,20 @@ const stopSystemContainers = async () => {
 };
 
 process.on('SIGTERM', async () => {
+  console.log('SIGTERM received. Shutting down gracefully...');
+  stopScheduler();
+  stopOrchestrator();
   await stopSystemContainers();
+  closeEtcd();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
+  console.log('SIGINT received. Shutting down gracefully...');
+  stopScheduler();
+  stopOrchestrator();
   await stopSystemContainers();
+  closeEtcd();
   process.exit(0);
 });
 

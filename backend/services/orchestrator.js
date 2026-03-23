@@ -58,6 +58,16 @@ const runOrchestrationLoop = async () => {
   }
 };
 
+let orchestratorInterval = null;
+
+export const stopOrchestrator = () => {
+  if (orchestratorInterval) {
+    clearInterval(orchestratorInterval);
+    orchestratorInterval = null;
+    console.log('[Orchestrator] Stopped.');
+  }
+};
+
 export const startOrchestrator = (localNodeId) => {
   console.log(`[Orchestrator] Initializing on Node ${localNodeId}...`);
   
@@ -66,7 +76,7 @@ export const startOrchestrator = (localNodeId) => {
   
   campaign.on('elected', () => {
     console.log('★ [Orchestrator] This node is now the Cluster Leader!');
-    setInterval(runOrchestrationLoop, 5000);
+    orchestratorInterval = setInterval(runOrchestrationLoop, 5000);
   });
 
   campaign.on('error', (err) => {

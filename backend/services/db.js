@@ -5,6 +5,11 @@ import { isNodeUnsealed, encrypt, decrypt } from './secrets.js';
 const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379', '127.0.0.1:2379'];
 const etcd = new Etcd3({ hosts: etcdHosts });
 
+export const closeEtcd = () => {
+  console.log('[DB] Closing ETCD connection...');
+  etcd.close();
+};
+
 /**
  * CoreDB Wrapper to handle encryption for keys starting with 'core/'
  */
