@@ -1,0 +1,16 @@
+# Alpine Answer File for CoreDocker
+KEYMAPOPTS="us us"
+HOSTNAMEOPTS="-n core-docker-node"
+INTERFACESOPTS="auto eth0
+iface eth0 inet dhcp"
+DNSOPTS="-d local"
+TIMEZONEOPTS="-z UTC"
+PROXYOPTS="none"
+APKREPOSOPTS="-f -c"
+USEROPTS="-a -u kees"
+USERPASSWOPTS="kees:kees"
+SSHDOPTS="-c openssh"
+NTPOPTS="-c chrony"
+DISKOPTS="-m sys /dev/vda"
+LBUOPTS="none"
+APKCACHEOPTS="none"

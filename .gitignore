@@ -13,3 +13,7 @@ yarn-debug.log*
 yarn-error.log*
 .idea
 .vscode
+# VM related files
+vm/*.qcow2
+vm/*.iso
+vm/pids/
