@@ -22,7 +22,6 @@ CoreDocker is a comprehensive, full-stack Docker orchestration and management da
   - `components/`: Modular UI components for managing different aspects of the cluster (Containers, Nodes, Secrets, Tasks, Settings).
   - `pages/`: Application views and API proxying logic.
 - `nginx/`: Configuration for the dynamic reverse proxy.
-- `plans/`: Documentation for cluster implementation and future goals.
 
 ## Getting Started
 

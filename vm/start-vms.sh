@@ -8,20 +8,34 @@ ALPINE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/releases
 VM_COUNT=3
 VM_PREFIX="core-docker-node"
 VM_MEM=2048
-VM_DISK="10G"
+VM_CPUS=1
+VM_DISK_SIZE="10" # in GB
 VM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "${VM_DIR}")"
-PID_DIR="${VM_DIR}/pids"
 HEADLESS=false # Set to true to run in the background without a window
 
-mkdir -p "${PID_DIR}"
+# Check for libvirt/virsh
+if ! command -v virsh &> /dev/null; then
+    echo "ERROR: 'virsh' not found. Please install libvirt (e.g., sudo apt install libvirt-daemon-system libvirt-clients virtinst)."
+    exit 1
+fi
 
-# Check for KVM
-if [ ! -e /dev/kvm ]; then
-    echo "WARNING: /dev/kvm not found. Performance will be slow."
-    KVM_OPT=""
+# Set graphics and console options based on HEADLESS
+if [ "$HEADLESS" = true ]; then
+    GRAPHICS_OPTS="--graphics none --noautoconsole"
 else
-    KVM_OPT="-enable-kvm"
+    # Check if virt-viewer is installed for windowed mode
+    if ! command -v virt-viewer &> /dev/null; then
+        echo "WARNING: 'virt-viewer' not found. You might not see the VM window. Install it with your package manager."
+    fi
+    GRAPHICS_OPTS="--graphics spice --autoconsole graphical"
+fi
+
+# Ensure default network is active
+if ! virsh net-info default | grep -q "Active:.*yes"; then
+    echo "Starting default network..."
+    virsh net-start default 2>/dev/null || true
+    virsh net-autostart default 2>/dev/null || true
 fi
 
 # Download Alpine ISO if not present
@@ -34,59 +48,62 @@ fi
 for i in $(seq 1 ${VM_COUNT}); do
     VM_NAME="${VM_PREFIX}-${i}"
     DISK_IMG="${VM_DIR}/${VM_NAME}.qcow2"
-    PID_FILE="${PID_DIR}/${VM_NAME}.pid"
     
     echo "Checking VM: ${VM_NAME}..."
 
-    # Create disk if it doesn't exist
-    if [ ! -f "${DISK_IMG}" ]; then
-        echo "Creating disk image for ${VM_NAME}..."
-        qemu-img create -f qcow2 "${DISK_IMG}" "${VM_DISK}"
-    fi
-
-    # Check if VM is already running
-    if [ -f "${PID_FILE}" ] && kill -0 $(cat "${PID_FILE}") 2>/dev/null; then
-        echo "VM ${VM_NAME} is already running (PID: $(cat "${PID_FILE}"))."
+    # Check if VM is already defined in libvirt
+    if virsh list --all | grep -q "${VM_NAME}"; then
+        if virsh list --all | grep "${VM_NAME}" | grep -q "running"; then
+            echo "VM ${VM_NAME} is already running."
+        else
+            echo "Starting existing VM ${VM_NAME}..."
+            virsh start "${VM_NAME}"
+            if [ "$HEADLESS" = false ]; then
+                virt-viewer --connect qemu:///system "${VM_NAME}" &
+            fi
+        fi
         continue
     fi
 
-    # Calculate ports
-    SSH_PORT=$((2220 + i))
-    HTTP_PORT=$((8080 + i))
-    HTTPS_PORT=$((8440 + i))
-
-    echo "Starting VM: ${VM_NAME} (SSH: ${SSH_PORT}, HTTP: ${HTTP_PORT}, HTTPS: ${HTTPS_PORT})..."
-    
-    DISPLAY_OPT="-display default"
-    if [ "$HEADLESS" = true ]; then
-        DISPLAY_OPT="-display none -daemonize"
+    # Define installation vs import options
+    INSTALL_OPTS="--cdrom ${VM_DIR}/${ALPINE_ISO}"
+    if [ -f "${DISK_IMG}" ]; then
+        echo "Found existing disk for ${VM_NAME}. Importing..."
+        INSTALL_OPTS="--import"
+    else
+        echo "Creating new disk and starting installation for ${VM_NAME}..."
     fi
 
-    qemu-system-x86_64 \
-        ${KVM_OPT} \
-        -name "${VM_NAME}" \
-        -m ${VM_MEM} \
-        -smp 1 \
-        -drive file="${DISK_IMG}",if=virtio \
-        -cdrom "${VM_DIR}/${ALPINE_ISO}" \
-        -boot order=cd \
-        -net nic,model=virtio \
-        -net user,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${HTTP_PORT}-:80,hostfwd=tcp::${HTTPS_PORT}-:443 \
-        -virtfs local,path="${PROJECT_DIR}",mount_tag=project,security_model=none,id=project \
-        ${DISPLAY_OPT} \
-        -pidfile "${PID_FILE}"
+    # Use virt-install to define and start the VM
+    virt-install \
+        --connect qemu:///system \
+        --name "${VM_NAME}" \
+        --memory "${VM_MEM}" \
+        --vcpus "${VM_CPUS}" \
+        --disk path="${DISK_IMG}",size="${VM_DISK_SIZE}",format=qcow2,bus=virtio \
+        ${INSTALL_OPTS} \
+        --os-variant alpinelinux3.21 \
+        --network network=default,model=virtio \
+        --filesystem "${PROJECT_DIR}",project,mode=mapped \
+        ${GRAPHICS_OPTS}
 
-    echo "VM ${VM_NAME} started in the background (PID: $(cat "${PID_FILE}"))."
+    echo "VM ${VM_NAME} created and started."
 done
 
 echo ""
-echo "VMs are running. To perform the Alpine installation:"
-echo "1. Connect to each VM. Since they are headless, you can use 'telnet' if you add '-serial telnet::xxxx,server,nowait', or change '-display none' to '-display gtk' temporarily to see the screen."
-echo "2. Inside the VM, run: setup-alpine -f /media/project/vm/answers"
+echo "VMs are running! To find their IP addresses:"
+echo "  virsh net-dhcp-leases default"
+echo ""
+echo "To connect to a VM console (Ctrl+] to exit):"
+echo "  virsh console ${VM_PREFIX}-1"
+echo ""
+echo "Inside the VM, perform the installation:"
+echo "1. Mount the project folder: mkdir -p /media/project && mount -t 9p -o trans=virtio project /media/project"
+echo "2. Run: setup-alpine -f /media/project/vm/answers"
 echo "3. Once installed, run: apk add docker docker-cli-compose"
-echo "4. Add your user to the docker group: addgroup kees docker && rc-update add docker boot && service docker start"
+echo "4. Setup docker and group:"
+echo "   addgroup kees docker && rc-update add docker boot && service docker start"
 echo ""
-echo "SSH access (after installation):"
-for i in $(seq 1 ${VM_COUNT}); do
-    echo "  ${VM_PREFIX}-${i}: ssh -p $((2220 + i)) kees@localhost"
-done
+echo "5. Make the project mount persistent across reboots:"
+echo "   echo 'project /media/project 9p trans=virtio,version=9p2000.L,rw 0 0' >> /etc/fstab"
+echo "   mount -a && ls /media/project  # Verify it works"
