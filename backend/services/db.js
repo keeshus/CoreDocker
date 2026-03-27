@@ -148,8 +148,17 @@ export const getLocalNodeConfig = async () => {
     }
   }
 
-  const localNode = nodes.find(n => localIps.includes(n.ip));
-  return localNode || { backupPath: '/data/backup', nonBackupPath: '/data/non-backup' };
+  // Find node by IP
+  let localNode = nodes.find(n => localIps.includes(n.ip));
+  
+  // If not found, check if we have system-wide defaults
+  if (!localNode) {
+    const backupPath = await etcd.get('system/backup_path').string() || '/data/backup';
+    const nonBackupPath = await etcd.get('system/non_backup_path').string() || '/data/non-backup';
+    return { backupPath, nonBackupPath };
+  }
+  
+  return localNode;
 };
 
 export const getContainers = async () => {

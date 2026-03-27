@@ -41,6 +41,9 @@ export const bootstrapEtcd = async () => {
 
       console.log(`Using network: ${networkName}`);
 
+      const localNode = await getLocalNodeConfig();
+      const etcdDataPath = `${localNode.backupPath}/etcd-data`;
+
       const createOpts = {
         Image: ETCD_IMAGE,
         name: CONTAINER_NAME,
@@ -53,10 +56,14 @@ export const bootstrapEtcd = async () => {
           '--initial-advertise-peer-urls', `http://${CONTAINER_NAME}:2380`,
           '--initial-cluster', `node-1=http://${CONTAINER_NAME}:2380`,
           '--initial-cluster-token', 'core-docker-cluster',
-          '--initial-cluster-state', 'new'
+          '--initial-cluster-state', 'new',
+          '--data-dir', '/etcd-data'
         ],
         HostConfig: {
-          RestartPolicy: { Name: 'always' }
+          RestartPolicy: { Name: 'always' },
+          Binds: [
+            `${etcdDataPath}:/etcd-data`
+          ]
         },
         NetworkingConfig: {
           EndpointsConfig: {

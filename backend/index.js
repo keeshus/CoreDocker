@@ -136,8 +136,8 @@ app.get('/system/status', async (req, res) => {
 
 app.post('/system/setup', async (req, res) => {
   try {
-    const { password } = req.body;
-    await initializeSystem(password);
+    const { password, backupPath, nonBackupPath } = req.body;
+    await initializeSystem(password, backupPath, nonBackupPath);
     await registerLocalNode(nodeId, nodeName, nodeIp);
     await bootCluster(nodeId);
 
@@ -228,7 +228,7 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-app.listen(port, async () => {
+app.listen(port, '0.0.0.0', async () => {
   console.log(`Backend running on port ${port} (Node: ${nodeName}, ID: ${nodeId}, IP: ${nodeIp})`);
   try {
     await bootstrapEtcd();

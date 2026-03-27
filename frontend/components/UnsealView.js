@@ -16,14 +16,12 @@ export default function UnsealView({ status, onUnseal }) {
         boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', width: '400px' 
       }}>
         <h1 style={{ marginTop: 0 }}>
-          {!status.authenticated ? '🔑 Login Required' : (status.initialized ? '🔒 Node Sealed' : '🚀 System Setup')}
+          {!status.authenticated ? '🔑 Login Required' : '🔒 Node Sealed'}
         </h1>
         <p style={{ color: '#64748b', marginBottom: '24px' }}>
           {!status.authenticated && status.unsealed
             ? 'Your session has expired. Please log in with the master password.'
-            : (status.initialized
-                ? `Enter the master password to unseal node ${status.nodeName}.`
-                : 'Initialize the system by setting a master password. This will be used to encrypt all cluster secrets.')}
+            : `Enter the master password to unseal node ${status.nodeName}.`}
         </p>
         <form onSubmit={handleUnseal}>
           <input 
@@ -40,7 +38,7 @@ export default function UnsealView({ status, onUnseal }) {
               border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer'
             }}
           >
-            {!status.authenticated && status.unsealed ? 'Login' : (status.initialized ? 'Unseal Node' : 'Initialize System')}
+            {!status.authenticated && status.unsealed ? 'Login' : 'Unseal Node'}
           </button>
         </form>
         {status.initialized && (

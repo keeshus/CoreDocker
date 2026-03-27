@@ -6,12 +6,11 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./nginx/conf.d:/app/nginx/conf.d
-      - ./nginx/ssl:/app/nginx/ssl
+      - /data/backup:/data/backup
     environment:
       - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
       # Set this to true in production hosts where port 53 is free
-      - DNS_PRODUCTION=false
+      - DNS_PRODUCTION=true
     networks:
       - backhaul
     restart: always
@@ -34,8 +33,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./nginx/ssl:/etc/nginx/ssl
+      - /data/backup/nginx/conf.d:/etc/nginx/conf.d
+      - /data/backup/nginx/ssl:/etc/nginx/ssl
     networks:
       - web-proxy
       - backhaul

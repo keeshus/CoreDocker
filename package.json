@@ -6,7 +6,7 @@
     "backend": "node backend/index.js",
     "frontend:dev": "next dev frontend",
     "frontend:build": "next build frontend",
-    "frontend:start": "next start frontend"
+    "frontend:start": "next start frontend -H 0.0.0.0"
   },
   "dependencies": {
     "dockerode": "^4.0.10",

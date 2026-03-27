@@ -7,6 +7,7 @@ import ClusterSettings from '../components/ClusterSettings';
 import NodeSettings from '../components/NodeSettings';
 import AppLayout from '../components/AppLayout';
 import UnsealView from '../components/UnsealView';
+import SetupView from '../components/SetupView';
 import CreateContainer from '../components/CreateContainer';
 
 export default function Home() {
@@ -74,13 +75,13 @@ export default function Home() {
     }
   }, [events]);
 
-  const handleUnseal = async (password) => {
+  const handleUnseal = async (payload) => {
     const endpoint = status.initialized ? '/api/system/unseal' : '/api/system/setup';
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify(typeof payload === 'string' ? { password: payload } : payload)
       });
       if (res.ok) {
         refreshData();
@@ -134,6 +135,9 @@ export default function Home() {
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
   
   if (status && (!status.unsealed || !status.authenticated)) {
+    if (!status.initialized) {
+      return <SetupView onSetup={handleUnseal} />;
+    }
     return <UnsealView status={status} onUnseal={handleUnseal} />;
   }
 

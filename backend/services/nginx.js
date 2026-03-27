@@ -2,9 +2,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import docker from './docker.js';
 
-const NGINX_CONF_DIR = process.env.NODE_ENV === 'development' ? path.join(process.cwd(), 'nginx', 'conf.d') : '/app/nginx/conf.d';
+const NGINX_CONF_DIR = process.env.NODE_ENV === 'development' ? path.join(process.cwd(), 'nginx', 'conf.d') : '/data/backup/nginx/conf.d';
 const NGINX_LOCATIONS_DIR = path.join(NGINX_CONF_DIR, 'locations');
-const NGINX_SSL_DIR = process.env.NODE_ENV === 'development' ? path.join(process.cwd(), 'nginx', 'ssl') : '/app/nginx/ssl';
+const NGINX_SSL_DIR = process.env.NODE_ENV === 'development' ? path.join(process.cwd(), 'nginx', 'ssl') : '/data/backup/nginx/ssl';
 
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
     // Validation
@@ -26,6 +26,7 @@ export async function addRoute(containerName, uri, port, domain = null, sslCert 
     }
 
     // Ensure directories exist
+    await fs.mkdir(NGINX_CONF_DIR, { recursive: true });
     await fs.mkdir(NGINX_LOCATIONS_DIR, { recursive: true });
     await fs.mkdir(NGINX_SSL_DIR, { recursive: true });
 
