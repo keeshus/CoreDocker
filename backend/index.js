@@ -23,7 +23,7 @@ import {v4 as uuidv4} from 'uuid';
 import {
   changeMasterPassword,
   initializeSystem,
-  isNodeUnsealed,
+  isNodeSealed,
   isSystemInitialized,
   rotateDEK,
   unsealNode,
@@ -52,7 +52,7 @@ const bootCluster = async (nodeId) => {
     console.log('[Cluster] Already booted.');
     return;
   }
-  if (!isNodeUnsealed()) {
+  if (isNodeSealed()) {
     console.log('[Cluster] Cannot boot: Node is sealed.');
     return;
   }
@@ -98,12 +98,12 @@ const requireAuth = (req, res, next) => {
 
 // Unseal Middleware
 const requireUnsealed = (req, res, next) => {
-  if (!isNodeUnsealed()) {
+  if (isNodeSealed()) {
     return res.status(423).json({
       error: 'Node is sealed',
       nodeId,
       nodeName,
-      unsealed: false
+      sealed: true
     });
   }
   next();
@@ -131,7 +131,7 @@ app.get('/system/status', async (req, res) => {
 
   res.json({
     initialized: await isSystemInitialized(),
-    unsealed: isNodeUnsealed(),
+    sealed: isNodeSealed(),
     authenticated,
     nodeId,
     nodeName
@@ -196,12 +196,12 @@ app.post('/system/rotate-dek', requireAuth, requireUnsealed, async (req, res) =>
 });
 
 const stopSystemContainers = async () => {
-  console.log('Stopping and removing system containers...');
+  console.log('Stopping and removing system containers and networks...');
   try {
     const containers = await docker.listContainers({ all: true });
     for (const c of containers) {
       if (c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend') {
-        console.log(`Cleaning up ${c.Names[0]}...`);
+        console.log(`Cleaning up container ${c.Names[0]}...`);
         try {
           const container = docker.getContainer(c.Id);
           await container.stop();
@@ -209,8 +209,21 @@ const stopSystemContainers = async () => {
         } catch(e) {}
       }
     }
+
+    const networks = await docker.listNetworks();
+    for (const n of networks) {
+      if (n.Name === 'backhaul' || n.Name === 'web-proxy' || n.Name.startsWith('group-')) {
+        console.log(`Cleaning up network ${n.Name}...`);
+        try {
+          const network = docker.getNetwork(n.Id);
+          await network.remove();
+        } catch(e) {
+          console.error(`Failed to remove network ${n.Name}: ${e.message}`);
+        }
+      }
+    }
   } catch (e) {
-    console.error('Error cleaning up system containers:', e.message);
+    console.error('Error cleaning up system resources:', e.message);
   }
 };
 
@@ -239,7 +252,7 @@ app.listen(port, '0.0.0.0', async () => {
     await waitForEtcd();
     await registerLocalNode(nodeId, nodeName, nodeIp);
     
-    if (isNodeUnsealed()) {
+    if (!isNodeSealed()) {
       await bootCluster(nodeId);
     } else {
       console.log('[Cluster] Node is sealed. Waiting for manual unseal.');

@@ -19,7 +19,7 @@ export default function UnsealView({ status, onUnseal }) {
           {!status.authenticated ? '🔑 Login Required' : '🔒 Node Sealed'}
         </h1>
         <p style={{ color: '#64748b', marginBottom: '24px' }}>
-          {!status.authenticated && status.unsealed
+          {!status.authenticated && !status.sealed
             ? 'Your session has expired. Please log in with the master password.'
             : `Enter the master password to unseal node ${status.nodeName}.`}
         </p>
@@ -38,7 +38,7 @@ export default function UnsealView({ status, onUnseal }) {
               border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer'
             }}
           >
-            {!status.authenticated && status.unsealed ? 'Login' : 'Unseal Node'}
+            {!status.authenticated && !status.sealed ? 'Login' : 'Unseal Node'}
           </button>
         </form>
         {status.initialized && (

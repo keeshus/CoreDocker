@@ -18,10 +18,10 @@ export const isSystemInitialized = async () => {
 };
 
 /**
- * Check if this specific node is unsealed (has the DEK in memory)
+ * Check if this specific node is sealed (lacks the DEK in memory)
  */
-export const isNodeUnsealed = () => {
-  return inMemoryDEK !== null;
+export const isNodeSealed = () => {
+  return inMemoryDEK === null;
 };
 
 /**
@@ -98,84 +98,48 @@ export const unsealNode = async (password) => {
 };
 
 /**
- * Generate a short-lived cluster token signed with the in-memory DEK
+ * Get the current DEK if unsealed
  */
-export const generateClusterToken = (payload = {}) => {
-  if (!inMemoryDEK) throw new Error('Node is sealed');
-  return jwt.sign(payload, inMemoryDEK.toString('hex'), { expiresIn: '1m' });
+export const getDEK = () => {
+  if (isNodeSealed()) {
+    throw new Error('Node is sealed');
+  }
+  return inMemoryDEK;
 };
 
 /**
- * Verify a cluster token using the in-memory DEK
+ * Encrypt a value using the DEK
  */
-export const verifyClusterToken = (token) => {
-  if (!inMemoryDEK) throw new Error('Node is sealed');
-  return jwt.verify(token, inMemoryDEK.toString('hex'));
-};
-
-export const encrypt = (text) => {
-  if (!inMemoryDEK) {
-    const err = new Error('Node is sealed');
-    err.statusCode = 423;
-    throw err;
-  }
+export const encrypt = (value) => {
+  const dek = getDEK();
   const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', inMemoryDEK, iv);
-  let encrypted = cipher.update(text);
+  const cipher = crypto.createCipheriv('aes-256-cbc', dek, iv);
+  let encrypted = cipher.update(value, 'utf8');
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
 };
 
-export const decrypt = (text) => {
-  if (!inMemoryDEK) {
-    const err = new Error('Node is sealed');
-    err.statusCode = 423;
-    throw err;
-  }
-  const textParts = text.split(':');
-  const iv = Buffer.from(textParts.shift(), 'hex');
-  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', inMemoryDEK, iv);
-  let decrypted = decipher.update(encryptedText);
-  decrypted = Buffer.concat([decrypted, decipher.final()]);
-  return decrypted.toString();
-};
-
-export const getSecret = async (key) => {
-  const encryptedValue = await etcd.get(`${SECRETS_PREFIX}${key}`).string();
-  if (!encryptedValue) return null;
-  return decrypt(encryptedValue);
-};
-
-export const setSecret = async (key, value) => {
-  const encryptedValue = encrypt(value);
-  await etcd.put(`${SECRETS_PREFIX}${key}`).value(encryptedValue);
-};
-
-export const deleteSecret = async (key) => {
-  await etcd.delete().key(`${SECRETS_PREFIX}${key}`);
-};
-
-export const getAllSecretKeys = async () => {
-  const allSecrets = await etcd.getAll().prefix(SECRETS_PREFIX).keys();
-  return allSecrets.map(k => k.replace(SECRETS_PREFIX, ''));
-};
-
 /**
- * Change the master password and re-encrypt the DEK
- * @param {string} currentPassword 
- * @param {string} newPassword 
+ * Decrypt a value using the DEK
  */
+export const decrypt = (encryptedPayload) => {
+  const dek = getDEK();
+  const [ivHex, encryptedHex] = encryptedPayload.split(':');
+  const iv = Buffer.from(ivHex, 'hex');
+  const encrypted = Buffer.from(encryptedHex, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', dek, iv);
+  let decrypted = decipher.update(encrypted);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString('utf8');
+};
+
 export const changeMasterPassword = async (currentPassword, newPassword) => {
-  if (!isNodeUnsealed()) {
+  if (isNodeSealed()) {
     throw new Error('Node must be unsealed to change master password');
   }
-
+  
+  // Verify current password
   const storedHashPayload = await etcd.get(MASTER_KEY_HASH_KEY).string();
-  if (!storedHashPayload) {
-    throw new Error('System not initialized');
-  }
-
   const [salt, storedHash] = storedHashPayload.split(':');
   const hash = crypto.scryptSync(currentPassword, salt, 64).toString('hex');
 
@@ -183,11 +147,12 @@ export const changeMasterPassword = async (currentPassword, newPassword) => {
     throw new Error('Invalid current master password');
   }
 
-  // 1. Generate new salt and hash for the new password
+  // Generate new salt and hash for the new password
   const newSalt = crypto.randomBytes(16).toString('hex');
   const newHash = crypto.scryptSync(newPassword, newSalt, 64).toString('hex');
+  await etcd.put(MASTER_KEY_HASH_KEY).value(`${newSalt}:${newHash}`);
 
-  // 2. Re-encrypt the existing inMemoryDEK with the new password
+  // Re-encrypt the DEK with the new master password
   const newMasterKey = crypto.scryptSync(newPassword, newSalt, 32);
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-cbc', newMasterKey, iv);
@@ -195,27 +160,15 @@ export const changeMasterPassword = async (currentPassword, newPassword) => {
   encryptedDEK = Buffer.concat([encryptedDEK, cipher.final()]);
   
   const encryptedDEKPayload = iv.toString('hex') + ':' + encryptedDEK.toString('hex');
-
-  // 3. Atomically save new hash and new encrypted DEK
-  await etcd.transaction()
-    .then(t => t.put(MASTER_KEY_HASH_KEY).value(`${newSalt}:${newHash}`))
-    .then(t => t.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload))
-    .commit();
-
-  console.log('[Secrets] Master password changed successfully.');
+  await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
 };
 
-/**
- * Rotate the Data Encryption Key (DEK)
- * Warning: This re-encrypts ALL data under core/ prefix.
- * @param {string} masterPassword - Required to authorize the rotation
- */
 export const rotateDEK = async (masterPassword) => {
-  if (!isNodeUnsealed()) {
+  if (isNodeSealed()) {
     throw new Error('Node must be unsealed to rotate DEK');
   }
 
-  // 1. Verify master password first
+  // Verify master password
   const storedHashPayload = await etcd.get(MASTER_KEY_HASH_KEY).string();
   const [salt, storedHash] = storedHashPayload.split(':');
   const hash = crypto.scryptSync(masterPassword, salt, 64).toString('hex');
@@ -224,64 +177,52 @@ export const rotateDEK = async (masterPassword) => {
     throw new Error('Invalid master password');
   }
 
-  console.log('[Secrets] Starting DEK rotation...');
+  // 1. Decrypt all secrets with the OLD DEK
+  const secrets = await etcd.get(SECRETS_PREFIX, { isPrefix: true }).all();
+  const decryptedSecrets = secrets.map(s => ({
+    key: s.key,
+    value: decrypt(s.value)
+  }));
 
-  // 2. Fetch all keys under 'core/' (encrypted data)
-  const allCoreData = await etcd.getAll().prefix('core/').strings();
-  
-  // 3. Generate a new DEK
-  const oldDEK = inMemoryDEK;
-  const newDEK = crypto.randomBytes(32);
+  // 2. Generate a NEW DEK
+  const newDek = crypto.randomBytes(32);
+  const oldDek = inMemoryDEK;
+  inMemoryDEK = newDek;
 
-  // 4. Re-encrypt all data
-  // We don't use a single transaction because it might exceed ETCD request size limit
-  const results = {
-    success: 0,
-    failed: 0,
-    errors: []
-  };
-
-  for (const [key, value] of Object.entries(allCoreData)) {
-    try {
-      // Decrypt with old DEK
-      const textParts = value.split(':');
-      const ivOld = Buffer.from(textParts.shift(), 'hex');
-      const encryptedOld = Buffer.from(textParts.join(':'), 'hex');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', oldDEK, ivOld);
-      let decrypted = decipher.update(encryptedOld);
-      decrypted = Buffer.concat([decrypted, decipher.final()]);
-
-      // Encrypt with new DEK
-      const ivNew = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv('aes-256-cbc', newDEK, ivNew);
-      let encryptedNew = cipher.update(decrypted);
-      encryptedNew = Buffer.concat([encryptedNew, cipher.final()]);
-      const newValue = ivNew.toString('hex') + ':' + encryptedNew.toString('hex');
-
-      await etcd.put(key).value(newValue);
-      results.success++;
-    } catch (err) {
-      console.error(`[Secrets] Failed to re-encrypt key ${key}:`, err.message);
-      results.failed++;
-      results.errors.push({ key, error: err.message });
+  try {
+    // 3. Re-encrypt all secrets with the NEW DEK
+    for (const secret of decryptedSecrets) {
+      await etcd.put(secret.key).value(encrypt(secret.value));
     }
+
+    // 4. Update the stored encrypted DEK
+    const masterKey = crypto.scryptSync(masterPassword, salt, 32);
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-cbc', masterKey, iv);
+    let encryptedDEK = cipher.update(newDek);
+    encryptedDEK = Buffer.concat([encryptedDEK, cipher.final()]);
+    
+    const encryptedDEKPayload = iv.toString('hex') + ':' + encryptedDEK.toString('hex');
+    await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
+
+    console.log('[Secrets] DEK rotated and secrets re-encrypted.');
+  } catch (err) {
+    // Rollback DEK in memory if something goes wrong
+    inMemoryDEK = oldDek;
+    throw err;
   }
+};
 
-  // 5. Re-encrypt the NEW DEK with the master password
-  const masterKey = crypto.scryptSync(masterPassword, salt, 32);
-  const ivDEK = crypto.randomBytes(16);
-  const cipherDEK = crypto.createCipheriv('aes-256-cbc', masterKey, ivDEK);
-  let encryptedNewDEK = cipherDEK.update(newDEK);
-  encryptedNewDEK = Buffer.concat([encryptedNewDEK, cipherDEK.final()]);
-  const encryptedDEKPayload = ivDEK.toString('hex') + ':' + encryptedNewDEK.toString('hex');
-
-  await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
-
-  // 6. Update in-memory DEK
-  inMemoryDEK = newDEK;
-
-  console.log(`[Secrets] DEK rotation completed. Success: ${results.success}, Failed: ${results.failed}`);
-  if (results.failed > 0) {
-    throw new Error(`DEK rotation partially failed. ${results.failed} keys could not be re-encrypted.`);
+export const verifyClusterToken = (token) => {
+  try {
+    const dek = getDEK();
+    return jwt.verify(token, dek.toString('hex'));
+  } catch (err) {
+    throw new Error('Invalid cluster token');
   }
+};
+
+export const signClusterToken = (payload) => {
+  const dek = getDEK();
+  return jwt.sign(payload, dek.toString('hex'), { expiresIn: '1h' });
 };

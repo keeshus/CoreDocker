@@ -1,6 +1,6 @@
 import { Etcd3 } from 'etcd3';
 import os from 'os';
-import { isNodeUnsealed, encrypt, decrypt } from './secrets.js';
+import { isNodeSealed, encrypt, decrypt } from './secrets.js';
 
 const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379', '127.0.0.1:2379'];
 const etcd = new Etcd3({ hosts: etcdHosts });
@@ -109,12 +109,12 @@ export const registerLocalNode = async (nodeId, name, ip) => {
     name,
     ip,
     status: 'online',
-    unsealed: isNodeUnsealed(),
+    sealed: isNodeSealed(),
     lastSeen: Date.now()
   };
   // Nodes are NOT encrypted, they use NODE_PREFIX which does not start with core/
   await nodeLease.put(`${NODE_PREFIX}${nodeId}`).value(JSON.stringify(node));
-  console.log(`Node ${nodeId} registered with lease (Unsealed: ${node.unsealed}).`);
+  console.log(`Node ${nodeId} registered with lease (Sealed: ${node.sealed}).`);
 };
 
 export const getNodes = async () => {

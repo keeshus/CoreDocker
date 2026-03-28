@@ -276,7 +276,7 @@ export default function ClusterSettings() {
                   </span>
                 </td>
                 <td style={{ padding: '15px 10px' }}>
-                  {node.unsealed ? (
+                  {!node.sealed ? (
                     <span style={{ color: '#059669', fontSize: '0.9em', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       🔓 Unsealed
                     </span>
