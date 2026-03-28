@@ -226,3 +226,37 @@ export const signClusterToken = (payload) => {
   const dek = getDEK();
   return jwt.sign(payload, dek.toString('hex'), { expiresIn: '1h' });
 };
+
+export const generateClusterToken = (payload) => signClusterToken(payload);
+
+/**
+ * Get a secret by key
+ */
+export const getSecret = async (key) => {
+  const encryptedValue = await etcd.get(`${SECRETS_PREFIX}${key}`).string();
+  if (!encryptedValue) return null;
+  return decrypt(encryptedValue);
+};
+
+/**
+ * Set a secret
+ */
+export const setSecret = async (key, value) => {
+  const encryptedValue = encrypt(value);
+  await etcd.put(`${SECRETS_PREFIX}${key}`).value(encryptedValue);
+};
+
+/**
+ * Delete a secret
+ */
+export const deleteSecret = async (key) => {
+  await etcd.delete(`${SECRETS_PREFIX}${key}`);
+};
+
+/**
+ * Get all secret keys
+ */
+export const getAllSecretKeys = async () => {
+  const secrets = await etcd.get(SECRETS_PREFIX, { isPrefix: true }).all();
+  return secrets.map(s => s.key.replace(SECRETS_PREFIX, ''));
+};
