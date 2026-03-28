@@ -72,12 +72,19 @@ export async function writeFileToHost(filePath, content) {
     const base64Content = Buffer.from(content).toString('base64');
     const fullPath = filePath.startsWith('/') ? filePath : `/data/backup/${filePath}`;
     
+    // Strict path validation to prevent command injection and directory traversal
+    if (fullPath.includes('..') || /[\$\&\|\>\<\;]/.test(fullPath)) {
+        throw new Error('Invalid file path');
+    }
+
     // Ensure directory exists first
     const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
     
+    // Using printf with base64 to avoid shell injection via echo or content
+    // We still use sh -c but we are extremely careful with inputs
     await runEphemeralTask('alpine', [
-        'sh', '-c', 
-        `mkdir -p "${dir}" && echo "${base64Content}" | base64 -d > "${fullPath}"`
+        'sh', '-c',
+        `mkdir -p "${dir.replace(/"/g, '\\"')}" && printf "%s" "${base64Content}" | base64 -d > "${fullPath.replace(/"/g, '\\"')}"`
     ]);
 }
 
@@ -86,5 +93,10 @@ export async function writeFileToHost(filePath, content) {
  */
 export async function removeFileFromHost(filePath) {
     const fullPath = filePath.startsWith('/') ? filePath : `/data/backup/${filePath}`;
+    
+    if (fullPath.includes('..') || /[\$\&\|\>\<\;]/.test(fullPath)) {
+        throw new Error('Invalid file path');
+    }
+
     await runEphemeralTask('alpine', ['rm', '-f', fullPath]);
 }

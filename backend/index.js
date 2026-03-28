@@ -129,12 +129,15 @@ app.get('/system/status', async (req, res) => {
     } catch (err) {}
   }
 
+  const initialized = await isSystemInitialized();
+
   res.json({
-    initialized: await isSystemInitialized(),
+    initialized,
     sealed: isNodeSealed(),
     authenticated,
-    nodeId,
-    nodeName
+    // Only leak node specific details if authenticated or system is not yet initialized
+    nodeId: (authenticated || !initialized) ? nodeId : undefined,
+    nodeName: (authenticated || !initialized) ? nodeName : undefined
   });
 });
 

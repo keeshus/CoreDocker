@@ -14,43 +14,39 @@ export const closeEtcd = () => {
  * CoreDB Wrapper to handle encryption for keys starting with 'core/'
  */
 class CoreDB {
-  async put(key, value) {
-    let finalValue = typeof value === 'string' ? value : JSON.stringify(value);
-    if (key.startsWith('core/')) {
-      finalValue = encrypt(finalValue);
+  _shouldEncrypt(key) {
+    return key.startsWith('core/') || key.startsWith('secrets/');
+  }
+
+  _processValue(key, value, decrypting = false) {
+    if (!value) return null;
+    let processed = value;
+
+    if (this._shouldEncrypt(key)) {
+      processed = decrypting ? decrypt(value) : encrypt(value);
     }
+
+    if (decrypting) {
+      try { return JSON.parse(processed); } catch (e) { return processed; }
+    }
+    return typeof processed === 'string' ? processed : JSON.stringify(processed);
+  }
+
+  async put(key, value) {
+    const finalValue = this._processValue(key, value);
     return await etcd.put(key).value(finalValue);
   }
 
   async get(key) {
     const rawValue = await etcd.get(key).string();
-    if (!rawValue) return null;
-    
-    let processedValue = rawValue;
-    if (key.startsWith('core/')) {
-      processedValue = decrypt(rawValue);
-    }
-
-    try {
-      return JSON.parse(processedValue);
-    } catch (e) {
-      return processedValue;
-    }
+    return this._processValue(key, rawValue, true);
   }
 
   async getAll(prefix) {
     const all = await etcd.getAll().prefix(prefix).strings();
     const results = {};
     for (const [key, value] of Object.entries(all)) {
-      let processedValue = value;
-      if (key.startsWith('core/')) {
-        processedValue = decrypt(value);
-      }
-      try {
-        results[key] = JSON.parse(processedValue);
-      } catch (e) {
-        results[key] = processedValue;
-      }
+      results[key] = this._processValue(key, value, true);
     }
     return results;
   }
