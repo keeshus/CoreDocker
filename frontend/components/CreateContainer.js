@@ -331,21 +331,30 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                     >
                       <option value="">-- No Group --</option>
                       {groups.map(g => (
-                        <option key={g.id} value={g.name}>{g.name}</option>
+                        <option key={g.id} value={g.id}>{g.name} {g.config?.highAvailability ? '(HA Group)' : ''}</option>
                       ))}
                     </select>
                     <small style={{ color: '#64748b' }}>Containers with the same group name are linked in an isolated network.</small>
                   </label>
                   
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
-                    <input
-                      type="checkbox"
-                      checked={formData.ha}
-                      onChange={e => setFormData({...formData, ha: e.target.checked})}
-                    />
-                    <span style={{ fontWeight: 'bold', color: '#475569' }}>High Availability (HA) Failover</span>
-                  </label>
-                  <small style={{ color: '#64748b', marginLeft: '25px' }}>If enabled, this container group will automatically fail over to a healthy node if its current host fails.</small>
+                  {(!formData.group || !groups.find(g => g.id === formData.group)?.config?.highAvailability) ? (
+                    <>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.ha}
+                          onChange={e => setFormData({...formData, ha: e.target.checked})}
+                        />
+                        <span style={{ fontWeight: 'bold', color: '#475569' }}>High Availability (HA) Failover</span>
+                      </label>
+                      <small style={{ color: '#64748b', marginLeft: '25px' }}>If enabled, this container group will automatically fail over to a healthy node if its current host fails.</small>
+                    </>
+                  ) : (
+                    <div style={{ padding: '10px', background: '#ecfdf5', borderRadius: '4px', border: '1px solid #10b981', color: '#065f46', fontSize: '0.85em', marginTop: '10px' }}>
+                      <strong>High Availability inherited from Group</strong>
+                      <p style={{ margin: '5px 0 0 0' }}>This container will follow the group's HA rules.</p>
+                    </div>
+                  )}
                 </div>
               </details>
 

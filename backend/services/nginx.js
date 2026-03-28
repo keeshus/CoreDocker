@@ -1,10 +1,11 @@
-import fs from 'fs/promises';
-import path from 'path';
 import docker from './docker.js';
+import etcd from './db.js';
+import { writeFileToHost, removeFileFromHost } from './ephemeral-tasks.js';
+import { logEvent } from './logger.js';
 
-const NGINX_CONF_DIR = process.env.NODE_ENV === 'development' ? path.join(process.cwd(), 'nginx', 'conf.d') : '/data/backup/nginx/conf.d';
-const NGINX_LOCATIONS_DIR = path.join(NGINX_CONF_DIR, 'locations');
-const NGINX_SSL_DIR = process.env.NODE_ENV === 'development' ? path.join(process.cwd(), 'nginx', 'ssl') : '/data/backup/nginx/ssl';
+const NGINX_CONF_DIR = 'nginx/conf.d';
+const NGINX_LOCATIONS_DIR = 'nginx/conf.d/locations';
+const NGINX_SSL_DIR = 'nginx/ssl';
 
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
     // Validation
@@ -25,18 +26,15 @@ export async function addRoute(containerName, uri, port, domain = null, sslCert 
         throw new Error('Invalid port format');
     }
 
-    // Ensure directories exist
-    await fs.mkdir(NGINX_CONF_DIR, { recursive: true });
-    await fs.mkdir(NGINX_LOCATIONS_DIR, { recursive: true });
-    await fs.mkdir(NGINX_SSL_DIR, { recursive: true });
+    logEvent('nginx', 'info', `Adding route for ${containerName} (${uriPath})`);
 
     if (domain && sslCert && sslKey) {
         // Domain specific configuration with SSL
-        const certPath = path.join(NGINX_SSL_DIR, `${containerName}.crt`);
-        const keyPath = path.join(NGINX_SSL_DIR, `${containerName}.key`);
+        const certPath = `${NGINX_SSL_DIR}/${containerName}.crt`;
+        const keyPath = `${NGINX_SSL_DIR}/${containerName}.key`;
         
-        await fs.writeFile(certPath, sslCert);
-        await fs.writeFile(keyPath, sslKey);
+        await writeFileToHost(certPath, sslCert);
+        await writeFileToHost(keyPath, sslKey);
 
         const confContent = `
 server {
@@ -61,8 +59,8 @@ server {
     }
 }
 `;
-        const confPath = path.join(NGINX_CONF_DIR, `${containerName}.conf`);
-        await fs.writeFile(confPath, confContent);
+        const confPath = `${NGINX_CONF_DIR}/${containerName}.conf`;
+        await writeFileToHost(confPath, confContent);
     } else {
         // Default behavior (no domain/ssl)
         const confContent = `
@@ -74,28 +72,26 @@ location ${uriPath} {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 `;
-        const confPath = path.join(NGINX_LOCATIONS_DIR, `${containerName}.conf`);
-        await fs.writeFile(confPath, confContent);
+        const confPath = `${NGINX_LOCATIONS_DIR}/${containerName}.conf`;
+        await writeFileToHost(confPath, confContent);
     }
     
     await reloadNginx();
 }
 
 export async function removeRoute(containerName) {
-    const locConfPath = path.join(NGINX_LOCATIONS_DIR, `${containerName}.conf`);
-    const domainConfPath = path.join(NGINX_CONF_DIR, `${containerName}.conf`);
-    const certPath = path.join(NGINX_SSL_DIR, `${containerName}.crt`);
-    const keyPath = path.join(NGINX_SSL_DIR, `${containerName}.key`);
+    const locConfPath = `${NGINX_LOCATIONS_DIR}/${containerName}.conf`;
+    const domainConfPath = `${NGINX_CONF_DIR}/${containerName}.conf`;
+    const certPath = `${NGINX_SSL_DIR}/${containerName}.crt`;
+    const keyPath = `${NGINX_SSL_DIR}/${containerName}.key`;
 
-    const unlinkSilent = async (p) => {
-        try { await fs.unlink(p); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-    };
+    logEvent('nginx', 'info', `Removing route for ${containerName}`);
 
     await Promise.all([
-        unlinkSilent(locConfPath),
-        unlinkSilent(domainConfPath),
-        unlinkSilent(certPath),
-        unlinkSilent(keyPath)
+        removeFileFromHost(locConfPath),
+        removeFileFromHost(domainConfPath),
+        removeFileFromHost(certPath),
+        removeFileFromHost(keyPath)
     ]);
     
     await reloadNginx();
@@ -120,4 +116,67 @@ export async function reloadNginx() {
     } catch (error) {
         console.error('Failed to reload Nginx:', error);
     }
+}
+
+export async function bootstrapNginx() {
+    const CONTAINER_NAME = 'core-docker-proxy';
+    const NGINX_IMAGE = 'nginx:latest';
+    
+    try {
+        const container = docker.getContainer(CONTAINER_NAME);
+        const info = await container.inspect();
+        if (!info.State.Running) {
+            await container.start();
+        }
+        console.log('[NGINX] Container is already running.');
+        return;
+    } catch (e) {
+        if (e.statusCode !== 404) throw e;
+    }
+
+    logEvent('nginx', 'info', 'Bootstrapping dynamic Nginx proxy...');
+
+    const backupPath = await etcd.get('system/backup_path') || '/data/backup';
+
+    // Ensure the image exists
+    try {
+        await docker.getImage(NGINX_IMAGE).inspect();
+    } catch (e) {
+        const stream = await docker.pull(NGINX_IMAGE);
+        await new Promise((resolve, reject) => {
+            docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
+        });
+    }
+
+    const networks = await docker.listNetworks();
+    const targetNetwork = networks.find(n => n.Name === 'backhaul' || n.Name.endsWith('_backhaul'));
+    const networkName = targetNetwork ? targetNetwork.Name : 'backhaul';
+
+    const webProxyNetwork = networks.find(n => n.Name === 'web-proxy' || n.Name.endsWith('_web-proxy'));
+    const webProxyName = webProxyNetwork ? webProxyNetwork.Name : 'web-proxy';
+
+    await docker.createContainer({
+        Image: NGINX_IMAGE,
+        name: CONTAINER_NAME,
+        ExposedPorts: { '80/tcp': {}, '443/tcp': {} },
+        HostConfig: {
+            PortBindings: {
+                '80/tcp': [{ HostPort: '80' }],
+                '443/tcp': [{ HostPort: '443' }]
+            },
+            Binds: [
+                `${backupPath}/nginx/conf.d:/etc/nginx/conf.d`,
+                `${backupPath}/nginx/ssl:/etc/nginx/ssl`
+            ],
+            RestartPolicy: { Name: 'always' }
+        },
+        NetworkingConfig: {
+            EndpointsConfig: {
+                [networkName]: {},
+                [webProxyName]: {}
+            }
+        }
+    }).then(container => container.start());
+    
+    logEvent('nginx', 'info', 'Dynamic Nginx proxy successfully bootstrapped.');
 }

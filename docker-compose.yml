@@ -6,7 +6,6 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /data/backup:/data/backup
     environment:
       - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
       # Set this to true in production hosts where port 53 is free
@@ -23,20 +22,6 @@ services:
     depends_on:
       - backend
     networks:
-      - backhaul
-    restart: always
-
-  nginx:
-    image: nginx:latest
-    container_name: core-docker-proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /data/backup/nginx/conf.d:/etc/nginx/conf.d
-      - /data/backup/nginx/ssl:/etc/nginx/ssl
-    networks:
-      - web-proxy
       - backhaul
     restart: always
 

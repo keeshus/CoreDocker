@@ -16,6 +16,8 @@ import {bootstrapEtcd} from './services/etcd-cluster.js';
 import {closeEtcd, registerLocalNode, waitForEtcd} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
+import {bootstrapNginx} from './services/nginx.js';
+import {startLogger, stopLogger} from './services/logger.js';
 import docker from './services/docker.js';
 import {v4 as uuidv4} from 'uuid';
 import {
@@ -56,6 +58,8 @@ const bootCluster = async (nodeId) => {
   }
   console.log('[Cluster] Booting services...');
   try {
+    startLogger();
+    await bootstrapNginx();
     await reconcileContainers(nodeId);
     startScheduler();
     startOrchestrator(nodeId);
