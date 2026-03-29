@@ -4,7 +4,7 @@ import { getLocalNodeConfig } from './db.js';
 const ETCD_IMAGE = process.env.ETCD_IMAGE || 'gcr.io/etcd-development/etcd:v3.6.8';
 const CONTAINER_NAME = 'core-docker-etcd';
 
-export const bootstrapEtcd = async (initialBackupPath = null) => {
+export const bootstrapEtcd = async () => {
   // Check if we are running in the main compose or cluster compose
   if (process.env.NODE_ID) {
     console.log(`[ETCD] Node ${process.env.NODE_ID} skipping individual bootstrap, assuming cluster ETCD is available.`);
@@ -20,10 +20,6 @@ export const bootstrapEtcd = async (initialBackupPath = null) => {
     return true;
   } catch (e) {
     if (e.statusCode === 404) {
-      if (!initialBackupPath) {
-        console.log('[ETCD] ETCD container not found and no backup path provided. Deferring creation until setup.');
-        return false;
-      }
       console.log('Bootstrapping initial ETCD container...');
       try {
         await docker.getImage(ETCD_IMAGE).inspect();
@@ -46,38 +42,18 @@ export const bootstrapEtcd = async (initialBackupPath = null) => {
 
       console.log(`Using network: ${networkName}`);
 
-      let backupPath = '/data/backup';
-      if (initialBackupPath) {
-        backupPath = initialBackupPath;
-        console.log(`[ETCD] Using provided initialBackupPath: ${backupPath}`);
-      } else {
-        try {
-          console.log('[ETCD] Attempting to read local node config to find backupPath...');
-          const localNode = await getLocalNodeConfig();
-          if (localNode?.backupPath) {
-            backupPath = localNode.backupPath;
-          }
-        } catch (err) {
-          console.log(`[ETCD] Failed to read local node config, which is expected during initial bootstrap: ${err.message}. Defaulting backupPath to: ${backupPath}`);
-        }
-      }
-      const etcdDataPath = `${backupPath}/etcd-data`;
+      const volumeName = 'core-docker-etcd-data';
       
-      console.log(`[ETCD] Using data path: ${etcdDataPath}`);
-
-      // Ensure data directory exists on the host
-      const fs = (await import('fs')).default;
       try {
-        if (!fs.existsSync(etcdDataPath)) {
-          console.log(`[ETCD] Creating data directory: ${etcdDataPath}`);
-          fs.mkdirSync(etcdDataPath, { recursive: true });
+        await docker.getVolume(volumeName).inspect();
+      } catch (e) {
+        if (e.statusCode === 404) {
+          console.log(`[ETCD] Creating named volume: ${volumeName}`);
+          await docker.createVolume({ Name: volumeName });
         }
-        // Also ensure we have write permissions
-        fs.accessSync(etcdDataPath, fs.constants.W_OK);
-        console.log(`[ETCD] Host data directory verified: ${etcdDataPath}`);
-      } catch (err) {
-        console.error(`[ETCD] CRITICAL: Host data directory ${etcdDataPath} is NOT accessible: ${err.message}`);
       }
+
+      console.log(`[ETCD] Using named volume: ${volumeName}`);
 
       const createOpts = {
         Image: ETCD_IMAGE,
@@ -101,7 +77,7 @@ export const bootstrapEtcd = async (initialBackupPath = null) => {
           User: '0:0',
           RestartPolicy: { Name: 'always' },
           Binds: [
-            `${etcdDataPath}:/etcd-data`
+            `${volumeName}:/etcd-data`
           ]
         },
         NetworkingConfig: {

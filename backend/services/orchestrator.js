@@ -30,11 +30,28 @@ const runOrchestrationLoop = async () => {
             continue;
           }
 
-          // 2. Select node with most resources (simple heuristic: node with fewest containers for now)
+          // 2. Select node with highest uncommitted resources
           candidates.sort((a, b) => {
-            const countA = containers.filter(c => c.current_node === a.id).length;
-            const countB = containers.filter(c => c.current_node === b.id).length;
-            return countA - countB;
+            const countA = containers.filter(c => c.current_node === a.id);
+            const countB = containers.filter(c => c.current_node === b.id);
+            
+            const memA = countA.reduce((sum, c) => sum + (c.config?.resources?.memoryLimit || 512 * 1024 * 1024), 0);
+            const memB = countB.reduce((sum, c) => sum + (c.config?.resources?.memoryLimit || 512 * 1024 * 1024), 0);
+            
+            const cpuA = countA.reduce((sum, c) => sum + (c.config?.resources?.cpuLimit || 1), 0);
+            const cpuB = countB.reduce((sum, c) => sum + (c.config?.resources?.cpuLimit || 1), 0);
+            
+            const freeMemA = (a.system?.totalMem || Number.MAX_SAFE_INTEGER) - memA;
+            const freeMemB = (b.system?.totalMem || Number.MAX_SAFE_INTEGER) - memB;
+
+            const freeCpuA = (a.system?.cpus || 4) - cpuA;
+            const freeCpuB = (b.system?.cpus || 4) - cpuB;
+
+            // Sort by CPU first, then Memory
+            if (freeCpuA !== freeCpuB) {
+              return freeCpuB - freeCpuA;
+            }
+            return freeMemB - freeMemA;
           });
 
           const targetNode = candidates[0];

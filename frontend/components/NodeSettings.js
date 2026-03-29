@@ -102,6 +102,16 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
         </select>
       </div>
 
+      {selectedNode && selectedNode.system && (
+        <div style={{ padding: '15px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', marginBottom: '20px', maxWidth: '400px' }}>
+          <strong>Hardware Resources</strong>
+          <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
+            <span>CPUs: {selectedNode.system.cpus || 'Unknown'}</span>
+            <span>Memory: {selectedNode.system.totalMem ? (selectedNode.system.totalMem / 1024 / 1024 / 1024).toFixed(2) + ' GB' : 'Unknown'}</span>
+          </div>
+        </div>
+      )}
+
       {loadingSettings ? (
         <div>Loading node settings...</div>
       ) : selectedNodeId ? (

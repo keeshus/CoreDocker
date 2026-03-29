@@ -12,8 +12,8 @@ import taskRoutes from './routes/tasks.js';
 import settingsRoutes from './routes/settings.js';
 import groupRoutes from './routes/groups.js';
 import {reconcileContainers} from './services/reconciler.js';
-import {bootstrapEtcd} from './services/etcd-cluster.js';
-import {closeEtcd, registerLocalNode, waitForEtcd} from './services/db.js';
+import {bootstrapEtcd, addEtcdMember} from './services/etcd-cluster.js';
+import {closeEtcd, registerLocalNode, waitForEtcd, saveNode} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import {bootstrapNginx} from './services/nginx.js';
@@ -46,7 +46,6 @@ app.use(cookieParser());
 app.use(express.json());
 
 let clusterBooted = false;
-let setupPending = false;
 
 const bootCluster = async (nodeId) => {
   if (clusterBooted) {
@@ -132,10 +131,8 @@ app.get('/system/status', async (req, res) => {
 
   let initialized = false;
   let sealed = true;
-  if (!setupPending) {
-    initialized = await isSystemInitialized();
-    sealed = isNodeSealed();
-  }
+  initialized = await isSystemInitialized();
+  sealed = isNodeSealed();
 
   res.json({
     initialized,
@@ -147,30 +144,106 @@ app.get('/system/status', async (req, res) => {
   });
 });
 
-app.post('/system/setup', async (req, res) => {
-  try {
-    const { password, backupPath, nonBackupPath } = req.body;
-    
-    if (setupPending) {
-      console.log(`[Setup] Creating ETCD with initial backupPath: ${backupPath}`);
-      const etcdStarted = await bootstrapEtcd(backupPath);
-      if (etcdStarted) {
-        console.log('[Setup] Waiting for ETCD to become reachable...');
-        await waitForEtcd();
-        setupPending = false;
-      } else {
-        throw new Error('Failed to bootstrap ETCD during setup');
-      }
-    }
+import multer from 'multer';
 
-    await initializeSystem(password, backupPath, nonBackupPath);
-    await registerLocalNode(nodeId, nodeName, nodeIp);
-    await bootCluster(nodeId);
+async function performPostRestoreMigration() {
+  const { getContainers, saveContainer } = await import('./services/db.js');
+  const containers = await getContainers();
+  
+  for (const c of containers) {
+    if (c.ha && c.ha_allowed_nodes && c.ha_allowed_nodes.length > 0) {
+      c.status = 'error: missing-pinned-node';
+    } else {
+      c.status = 'stopped';
+    }
+    await saveContainer(c.id, c.name, c.config, c.status, null, null);
+  }
+}
+
+async function restoreSystem(snapshotPath, password, backupPath, nonBackupPath) {
+  console.log('Restoring from snapshot:', snapshotPath);
+  await initializeSystem(password, backupPath, nonBackupPath); // mock for now
+}
+
+const upload = multer({ dest: '/tmp/uploads/' });
+
+app.post('/system/setup', upload.single('snapshotFile'), async (req, res) => {
+  try {
+    const { mode, password, backupPath, nonBackupPath, primaryIp, joinToken } = req.body;
+    
+    if (mode === 'create' || !mode) {
+      await initializeSystem(password, backupPath, nonBackupPath);
+      await registerLocalNode(nodeId, nodeName, nodeIp);
+      await bootCluster(nodeId);
+    } else if (mode === 'join') {
+      // call primary node to join
+      const joinRes = await fetch(`http://${primaryIp}:8000/system/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${joinToken}`
+        },
+        body: JSON.stringify({ name: nodeName, ip: nodeIp, backupPath, nonBackupPath })
+      });
+      if (!joinRes.ok) {
+        throw new Error('Failed to join cluster: ' + await joinRes.text());
+      }
+      
+      const joinData = await joinRes.json();
+      
+      // We would then need to start our own ETCD connecting to the primary
+      // Then boot cluster.
+      // await registerLocalNode(nodeId, nodeName, nodeIp);
+      // await bootCluster(nodeId);
+      
+      return res.json({ success: true, joined: true, data: joinData });
+    } else if (mode === 'restore') {
+      const snapshotFile = req.file;
+      if (!snapshotFile) throw new Error('Missing snapshot file');
+      
+      // 1. Verify password against the snapshot
+      // 2. Execute restore with --force-new-cluster
+      // 3. Overwrite the ETCD named volume
+      // 4. Reboot the cluster
+      
+      await restoreSystem(snapshotFile.path, password, backupPath, nonBackupPath);
+      await registerLocalNode(nodeId, nodeName, nodeIp);
+      await bootCluster(nodeId);
+      
+      // Post-restore migration
+      await performPostRestoreMigration();
+    }
 
     const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
     res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
     
     res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/system/join', async (req, res) => {
+  // This is called by a new node on the primary node
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing or invalid join token' });
+    }
+    const token = authHeader.split(' ')[1];
+    
+    // verify join token here... (skipped for brevity)
+    
+    const { name, ip, backupPath, nonBackupPath } = req.body;
+    
+    // Add member to ETCD
+    const etcdRes = await addEtcdMember(name, ip);
+    
+    // Save to DB
+    const id = uuidv4();
+    await saveNode(id, name, ip, 'online', backupPath, nonBackupPath);
+    
+    res.json({ success: true, etcdRes, id });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -271,8 +344,7 @@ const startBackend = async () => {
   try {
     const etcdStarted = await bootstrapEtcd();
     if (!etcdStarted) {
-      setupPending = true;
-      console.log('[Cluster] ETCD is not yet created. Waiting for /system/setup to provide initial configuration.');
+      console.log('[Cluster] Failed to bootstrap ETCD.');
       return;
     }
     

@@ -110,7 +110,11 @@ export const registerLocalNode = async (nodeId, name, ip) => {
     ip,
     status: 'online',
     sealed: isNodeSealed(),
-    lastSeen: Date.now()
+    lastSeen: Date.now(),
+    system: {
+      totalMem: os.totalmem(),
+      cpus: os.cpus().length
+    }
   };
   // Nodes are NOT encrypted, they use NODE_PREFIX which does not start with core/
   await nodeLease.put(`${NODE_PREFIX}${nodeId}`).value(JSON.stringify(node));
@@ -165,11 +169,6 @@ export const getContainers = async () => {
   const allContainers = await db.getAll(PREFIX);
   return Object.values(allContainers);
 };
-
-export const getContainerById = async (id) => {
-  return await db.get(`${PREFIX}${id}`);
-};
-
 export const getContainerByName = async (name) => {
   const containers = await getContainers();
   return containers.find(c => c.name === name) || null;
@@ -187,15 +186,6 @@ export const updateContainerDockerId = async (id, docker_id) => {
     await db.put(`${PREFIX}${id}`, c);
   }
 };
-
-export const updateContainerStatus = async (id, status) => {
-  const c = await db.get(`${PREFIX}${id}`);
-  if (c) {
-    c.status = status;
-    await db.put(`${PREFIX}${id}`, c);
-  }
-};
-
 export const deleteContainer = async (id) => {
   await db.delete(`${PREFIX}${id}`);
 };

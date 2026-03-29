@@ -76,6 +76,10 @@ router.post('/', async (req, res) => {
   try {
     const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
     
+    if (!resources || !resources.memoryLimit || !resources.cpuLimit) {
+      return res.status(400).json({ error: 'Memory and CPU limits are mandatory.' });
+    }
+
     const nodeId = req.body.current_node || process.env.NODE_ID || 'master';
 
     const proxied = await proxyToNode(nodeId, req, res);

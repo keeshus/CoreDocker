@@ -39,6 +39,14 @@ const DEFAULT_TASKS = [
     intervalMs: 24 * 60 * 60 * 1000,
     enabled: true,
     scope: 'cluster'
+  },
+  {
+    id: 'etcd-snapshot',
+    name: 'ETCD Database Snapshot',
+    scheduleDesc: 'Daily at 01:00',
+    intervalMs: 24 * 60 * 60 * 1000,
+    enabled: true,
+    scope: 'node'
   }
 ];
 
@@ -131,6 +139,49 @@ export const runTask = async (taskId) => {
       } else if (taskId === 'purge-old-logs') {
         await purgeOldLogs();
         taskResult = { stdout: 'Logs purged successfully', exitCode: 0 };
+      } else if (taskId === 'etcd-snapshot') {
+        const { getLocalNodeConfig } = await import('./db.js');
+        const localConfig = await getLocalNodeConfig();
+        const backupPath = localConfig?.backupPath || '/data/backup';
+        const snapshotName = `etcd-snapshot-${new Date().toISOString().replace(/:/g, '-')}.db`;
+        const destPath = `${backupPath}/${snapshotName}`;
+        
+        const docker = (await import('./docker.js')).default;
+        const etcdContainer = docker.getContainer('core-docker-etcd');
+        const exec = await etcdContainer.exec({
+          Cmd: ['sh', '-c', `etcdctl snapshot save /tmp/${snapshotName} && cat /tmp/${snapshotName}`],
+          AttachStdout: true,
+          AttachStderr: true
+        });
+        
+        taskResult = await new Promise((resolve, reject) => {
+          exec.start(async (err, stream) => {
+            if (err) return reject(err);
+            
+            const fs = await import('fs');
+            if (!fs.existsSync(backupPath)) {
+              fs.mkdirSync(backupPath, { recursive: true });
+            }
+            
+            const writeStream = fs.createWriteStream(destPath);
+            stream.on('data', chunk => {
+              // Docker multiplexed stream: ignore headers if not using docker-modem demux, but since it's an exec stream we should be careful.
+                // A better way is using runEphemeralTask but ETCD requires connecting to the live ETCD container.
+            });
+            
+            docker.modem.demuxStream(stream, writeStream, process.stderr);
+            
+            stream.on('end', async () => {
+              const inspectData = await exec.inspect();
+              if (inspectData.ExitCode === 0) {
+                resolve({ stdout: `Snapshot saved to ${destPath}`, exitCode: 0 });
+              } else {
+                resolve({ stdout: `Failed to save snapshot`, exitCode: inspectData.ExitCode });
+              }
+            });
+          });
+        });
+        
       } else {
         // Default simulated task
         await new Promise(resolve => setTimeout(resolve, 3000));
