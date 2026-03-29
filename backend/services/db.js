@@ -2,8 +2,8 @@ import { Etcd3 } from 'etcd3';
 import os from 'os';
 import { isNodeSealed, encrypt, decrypt } from './secrets.js';
 
-const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379', '127.0.0.1:2379'];
-const etcd = new Etcd3({ hosts: etcdHosts });
+const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379'];
+let etcd = new Etcd3({ hosts: etcdHosts });
 
 export const closeEtcd = () => {
   console.log('[DB] Closing ETCD connection...');
@@ -59,7 +59,8 @@ class CoreDB {
 const db = new CoreDB();
 
 export const waitForEtcd = async (retries = 60, delay = 2000) => {
-  console.log(`Connecting to ETCD at ${etcdHosts}...`);
+  const host = etcdHosts[0];
+  console.log(`Connecting to ETCD at ${host}...`);
   for (let i = 0; i < retries; i++) {
     try {
       // Simple operation to check connection
@@ -67,13 +68,16 @@ export const waitForEtcd = async (retries = 60, delay = 2000) => {
       console.log('Successfully connected to ETCD.');
       return true;
     } catch (e) {
-      // If we are getting UNAVAILABLE, we might need to recreate the client if it's stuck
-      // but usually etcd3 handles reconnection. We just need to wait.
       console.error(`ETCD connection attempt ${i + 1} failed: ${e.message}`);
-      if (e.code === 'DEADLINE_EXCEEDED' || e.message.includes('DNS resolution failed')) {
-        console.error('Details: ETCD host might not be reachable or service is starting up.');
-      }
+      
       if (i === retries - 1) throw new Error(`Could not connect to ETCD after ${retries} attempts: ${e.message}`);
+      
+      // Force client to clear any cached DNS/connections by recreating it
+      try {
+        etcd.close();
+        etcd = new Etcd3({ hosts: [host] });
+      } catch (ce) {}
+
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }

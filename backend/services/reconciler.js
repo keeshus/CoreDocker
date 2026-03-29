@@ -24,12 +24,21 @@ const ensureImage = async (image) => {
 
 const reconcileDNSVIP = async (localNodeId) => {
   try {
-    const settingsStr = await etcd.get(SETTINGS_KEY).string();
-    const settings = settingsStr ? JSON.parse(settingsStr) : null;
+    const settingsStr = await etcd.get(SETTINGS_KEY).string().catch(() => null);
+    if (!settingsStr) return; // Database not ready or settings missing
     
-    if (!settings || !settings.dnsVip) return;
+    const settings = JSON.parse(settingsStr);
+    
+    if (!settings.dnsVip) return;
 
-    const allNodes = await getNodes();
+    let allNodes;
+    try {
+      allNodes = await getNodes();
+    } catch (nodeErr) {
+      console.warn(`[Reconciler] Failed to fetch nodes for DNS VIP: ${nodeErr.message}`);
+      return;
+    }
+    
     const sortedNodes = allNodes.sort((a, b) => a.id.localeCompare(b.id));
     const nodeIndex = sortedNodes.findIndex(n => n.id === localNodeId);
 
@@ -105,7 +114,14 @@ const reconcileCoreDNS = async (localNodeId) => {
     const containerName = 'core-docker-coredns';
     let container;
     
-    const nodes = await getNodes();
+    let nodes;
+    try {
+      nodes = await getNodes();
+    } catch (nodeErr) {
+      console.warn(`[Reconciler] Failed to fetch nodes for CoreDNS: ${nodeErr.message}. Retrying soon.`);
+      return; // Skip this run, will be retried by the main loop
+    }
+    
     let staticEntries = '';
     for (const node of nodes) {
       staticEntries += `    hosts {
@@ -198,12 +214,19 @@ ${staticEntries}
 export const reconcileContainers = async (localNodeId) => {
   console.log(`[Reconciler] Starting reconciliation for Node ${localNodeId}...`);
   
-  await reconcileCoreDNS(localNodeId);
-  await reconcileDNSVIP(localNodeId);
+  try {
+    await reconcileCoreDNS(localNodeId);
+    await reconcileDNSVIP(localNodeId);
 
-  const savedContainers = await getContainers();
+    let savedContainers;
+    try {
+      savedContainers = await getContainers();
+    } catch (dbErr) {
+      console.error(`[Reconciler] Database unavailable: ${dbErr.message}. Aborting reconciliation loop.`);
+      return;
+    }
 
-  for (const saved of savedContainers) {
+    for (const saved of savedContainers) {
     if (saved.current_node && saved.current_node !== localNodeId) {
       try {
         const localC = docker.getContainer(saved.name);
@@ -268,4 +291,7 @@ export const reconcileContainers = async (localNodeId) => {
     }
   }
   console.log('[Reconciler] Container reconciliation completed.');
+} catch (globalErr) {
+  console.error(`[Reconciler] Fatal error in reconciliation loop: ${globalErr.message}`);
+}
 };

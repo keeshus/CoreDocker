@@ -46,6 +46,7 @@ app.use(cookieParser());
 app.use(express.json());
 
 let clusterBooted = false;
+let setupPending = false;
 
 const bootCluster = async (nodeId) => {
   if (clusterBooted) {
@@ -129,11 +130,16 @@ app.get('/system/status', async (req, res) => {
     } catch (err) {}
   }
 
-  const initialized = await isSystemInitialized();
+  let initialized = false;
+  let sealed = true;
+  if (!setupPending) {
+    initialized = await isSystemInitialized();
+    sealed = isNodeSealed();
+  }
 
   res.json({
     initialized,
-    sealed: isNodeSealed(),
+    sealed,
     authenticated,
     // Only leak node specific details if authenticated or system is not yet initialized
     nodeId: (authenticated || !initialized) ? nodeId : undefined,
@@ -144,6 +150,19 @@ app.get('/system/status', async (req, res) => {
 app.post('/system/setup', async (req, res) => {
   try {
     const { password, backupPath, nonBackupPath } = req.body;
+    
+    if (setupPending) {
+      console.log(`[Setup] Creating ETCD with initial backupPath: ${backupPath}`);
+      const etcdStarted = await bootstrapEtcd(backupPath);
+      if (etcdStarted) {
+        console.log('[Setup] Waiting for ETCD to become reachable...');
+        await waitForEtcd();
+        setupPending = false;
+      } else {
+        throw new Error('Failed to bootstrap ETCD during setup');
+      }
+    }
+
     await initializeSystem(password, backupPath, nonBackupPath);
     await registerLocalNode(nodeId, nodeName, nodeIp);
     await bootCluster(nodeId);
@@ -248,10 +267,17 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-app.listen(port, '0.0.0.0', async () => {
-  console.log(`Backend running on port ${port} (Node: ${nodeName}, ID: ${nodeId}, IP: ${nodeIp})`);
+const startBackend = async () => {
   try {
-    await bootstrapEtcd();
+    const etcdStarted = await bootstrapEtcd();
+    if (!etcdStarted) {
+      setupPending = true;
+      console.log('[Cluster] ETCD is not yet created. Waiting for /system/setup to provide initial configuration.');
+      return;
+    }
+    
+    // Wait for ETCD to become reachable
+    console.log('[Cluster] Waiting for ETCD to become reachable...');
     await waitForEtcd();
     await registerLocalNode(nodeId, nodeName, nodeIp);
     
@@ -262,6 +288,12 @@ app.listen(port, '0.0.0.0', async () => {
     }
   } catch (e) {
     console.error(`Startup failed: ${e.message}`);
-    process.exit(1);
+    console.log('Retrying bootstrap in 5 seconds...');
+    setTimeout(startBackend, 5000);
   }
+};
+
+app.listen(port, '0.0.0.0', async () => {
+  console.log(`Backend running on port ${port} (Node: ${nodeName}, ID: ${nodeId}, IP: ${nodeIp})`);
+  await startBackend();
 });

@@ -4,11 +4,11 @@ import { getLocalNodeConfig } from './db.js';
 const ETCD_IMAGE = process.env.ETCD_IMAGE || 'gcr.io/etcd-development/etcd:v3.6.8';
 const CONTAINER_NAME = 'core-docker-etcd';
 
-export const bootstrapEtcd = async () => {
+export const bootstrapEtcd = async (initialBackupPath = null) => {
   // Check if we are running in the main compose or cluster compose
   if (process.env.NODE_ID) {
     console.log(`[ETCD] Node ${process.env.NODE_ID} skipping individual bootstrap, assuming cluster ETCD is available.`);
-    return;
+    return true;
   }
   try {
     const container = docker.getContainer(CONTAINER_NAME);
@@ -17,8 +17,13 @@ export const bootstrapEtcd = async () => {
       await container.start();
     }
     console.log('ETCD container is already running.');
+    return true;
   } catch (e) {
     if (e.statusCode === 404) {
+      if (!initialBackupPath) {
+        console.log('[ETCD] ETCD container not found and no backup path provided. Deferring creation until setup.');
+        return false;
+      }
       console.log('Bootstrapping initial ETCD container...');
       try {
         await docker.getImage(ETCD_IMAGE).inspect();
@@ -41,8 +46,38 @@ export const bootstrapEtcd = async () => {
 
       console.log(`Using network: ${networkName}`);
 
-      const localNode = await getLocalNodeConfig();
-      const etcdDataPath = `${localNode.backupPath}/etcd-data`;
+      let backupPath = '/data/backup';
+      if (initialBackupPath) {
+        backupPath = initialBackupPath;
+        console.log(`[ETCD] Using provided initialBackupPath: ${backupPath}`);
+      } else {
+        try {
+          console.log('[ETCD] Attempting to read local node config to find backupPath...');
+          const localNode = await getLocalNodeConfig();
+          if (localNode?.backupPath) {
+            backupPath = localNode.backupPath;
+          }
+        } catch (err) {
+          console.log(`[ETCD] Failed to read local node config, which is expected during initial bootstrap: ${err.message}. Defaulting backupPath to: ${backupPath}`);
+        }
+      }
+      const etcdDataPath = `${backupPath}/etcd-data`;
+      
+      console.log(`[ETCD] Using data path: ${etcdDataPath}`);
+
+      // Ensure data directory exists on the host
+      const fs = (await import('fs')).default;
+      try {
+        if (!fs.existsSync(etcdDataPath)) {
+          console.log(`[ETCD] Creating data directory: ${etcdDataPath}`);
+          fs.mkdirSync(etcdDataPath, { recursive: true });
+        }
+        // Also ensure we have write permissions
+        fs.accessSync(etcdDataPath, fs.constants.W_OK);
+        console.log(`[ETCD] Host data directory verified: ${etcdDataPath}`);
+      } catch (err) {
+        console.error(`[ETCD] CRITICAL: Host data directory ${etcdDataPath} is NOT accessible: ${err.message}`);
+      }
 
       const createOpts = {
         Image: ETCD_IMAGE,
@@ -57,9 +92,13 @@ export const bootstrapEtcd = async () => {
           '--initial-cluster', `node-1=http://${CONTAINER_NAME}:2380`,
           '--initial-cluster-token', 'core-docker-cluster',
           '--initial-cluster-state', 'new',
-          '--data-dir', '/etcd-data'
+          '--data-dir', '/etcd-data',
+          '--logger', 'zap',
+          '--log-outputs', 'stderr',
+          '--listen-metrics-urls', 'http://0.0.0.0:2381'
         ],
         HostConfig: {
+          User: '0:0',
           RestartPolicy: { Name: 'always' },
           Binds: [
             `${etcdDataPath}:/etcd-data`
@@ -74,9 +113,28 @@ export const bootstrapEtcd = async () => {
 
       const newContainer = await docker.createContainer(createOpts);
       await newContainer.start();
-      console.log('Initial ETCD container bootstrapped successfully.');
+      console.log('Initial ETCD container created and start command sent.');
+      
+      // Immediate state check
+      const immediate = await newContainer.inspect();
+      console.log(`[ETCD] Container status: ${immediate.State.Status}`);
+      if (immediate.State.Error) console.error(`[ETCD] Start error: ${immediate.State.Error}`);
+
+      // Verification of container state
+      setTimeout(async () => {
+          try {
+              const check = await newContainer.inspect();
+              if (!check.State.Running) {
+                  console.error(`[ETCD] Container failed to stay running! ExitCode: ${check.State.ExitCode}, Error: ${check.State.Error}`);
+              } else {
+                  console.log('[ETCD] Container is verified running.');
+              }
+          } catch (e) {}
+      }, 2000);
+      return true;
     } else {
       console.error('Error checking ETCD container:', e);
+      return false;
     }
   }
 };
