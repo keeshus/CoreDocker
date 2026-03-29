@@ -326,8 +326,8 @@ process.on('SIGTERM', async () => {
   console.log('SIGTERM received. Shutting down gracefully...');
   stopScheduler();
   stopOrchestrator();
-  await stopSystemContainers();
   closeEtcd();
+  await stopSystemContainers();
   process.exit(0);
 });
 
@@ -335,8 +335,8 @@ process.on('SIGINT', async () => {
   console.log('SIGINT received. Shutting down gracefully...');
   stopScheduler();
   stopOrchestrator();
-  await stopSystemContainers();
   closeEtcd();
+  await stopSystemContainers();
   process.exit(0);
 });
 
