@@ -22,6 +22,8 @@ services:
       dockerfile: frontend/Dockerfile
     depends_on:
       - backend
+    ports:
+      - "3000:3000"
     networks:
       - backhaul
     restart: always
