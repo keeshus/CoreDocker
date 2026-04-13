@@ -9,11 +9,19 @@ services:
       - core-docker-backend-data:/app/data
     environment:
       - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
-      # Set this to true in production hosts where port 53 is free
       - DNS_PRODUCTION=true
     networks:
       - backhaul
     restart: always
+    # Hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
 
   frontend:
     container_name: core-docker-frontend
@@ -27,6 +35,15 @@ services:
     networks:
       - backhaul
     restart: always
+    # Hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
 
 networks:
   web-proxy:

@@ -1,0 +1,20 @@
+{
+  "name": "@core-docker/backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.10",
+    "etcd3": "^1.1.2",
+    "express": "^5.2.1",
+    "uuid": "^13.0.0",
+    "helmet": "^8.1.0",
+    "cookie-parser": "^1.4.7",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.1"
+  }
+}

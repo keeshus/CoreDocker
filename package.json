@@ -2,25 +2,16 @@
   "name": "core-docker",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
-    "backend": "node backend/index.js",
-    "frontend:dev": "next dev frontend",
-    "frontend:build": "next build frontend",
-    "frontend:start": "next start frontend -H 0.0.0.0"
-  },
-  "dependencies": {
-    "dockerode": "^4.0.10",
-    "etcd3": "^1.1.2",
-    "express": "^5.2.1",
-    "next": "^16.2.1",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "lucide-react": "^0.577.0",
-    "uuid": "^13.0.0",
-    "helmet": "^8.1.0",
-    "cookie-parser": "^1.4.7",
-    "jsonwebtoken": "^9.0.3",
-    "multer": "^2.1.1"
+    "backend:start": "npm run start -w backend",
+    "backend:dev": "npm run dev -w backend",
+    "frontend:dev": "npm run dev -w frontend",
+    "frontend:build": "npm run build -w frontend",
+    "frontend:start": "npm run start -w frontend"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
