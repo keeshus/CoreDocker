@@ -10,6 +10,8 @@ services:
     environment:
       - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
       - DNS_PRODUCTION=true
+      - NODE_DOMAIN=${NODE_DOMAIN:-node-1.local}
+      - NODE_IP=${NODE_IP:-127.0.0.1}
     networks:
       - backhaul
     restart: always

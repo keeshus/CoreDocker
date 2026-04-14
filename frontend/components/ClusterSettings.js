@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Settings, Plus, Trash2 } from 'lucide-react';
 
 export default function ClusterSettings() {
-  const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '', dnsVip: '' });
+  const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '', dnsVip: '', clusterDomain: '', clusterVip: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -160,6 +160,32 @@ export default function ClusterSettings() {
       <p style={{ color: '#64748b' }}>Configure Cluster-wide settings and manage cluster nodes.</p>
 
       <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '600px', marginTop: '20px' }}>
+        <div>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Global Cluster Domain</label>
+          <input
+            type="text"
+            value={settings.clusterDomain}
+            onChange={e => setSettings({...settings, clusterDomain: e.target.value})}
+            placeholder="e.g. coredocker.domain.ext"
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+          />
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>The main domain name for the whole cluster (activated after unseal).</small>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Shared Cluster VIP</label>
+          <input
+            type="text"
+            value={settings.clusterVip}
+            onChange={e => setSettings({...settings, clusterVip: e.target.value})}
+            placeholder="e.g. 192.168.1.100"
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+          />
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>The floating IP address that users connect to. Point your Global Domain to this IP.</small>
+        </div>
+
+        <hr style={{ border: 'none', borderTop: '1px solid #e2e8f0', margin: '10px 0' }} />
+
         <div>
           <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Shared Virtual IP (VIP) Pool</label>
           <input 

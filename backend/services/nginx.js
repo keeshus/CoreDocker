@@ -1,5 +1,5 @@
 import docker from './docker.js';
-import etcd from './db.js';
+import etcd, { getLocalNodeConfig } from './db.js';
 import { writeFileToHost, removeFileFromHost } from './ephemeral-tasks.js';
 import { logEvent } from './logger.js';
 
@@ -8,6 +8,7 @@ const NGINX_LOCATIONS_DIR = 'nginx/conf.d/locations';
 const NGINX_SSL_DIR = 'nginx/ssl';
 
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
+    const isSealed = await etcd.get('system/master_hash').string().then(hash => !hash); // Basic check, better to use isNodeSealed if available
     // Validation
     const domainRegex = /^[a-zA-Z0-9.-]+$/;
     const uriRegex = /^\/[a-zA-Z0-9._\-\/]*$/;
@@ -136,7 +137,9 @@ export async function bootstrapNginx() {
 
     logEvent('nginx', 'info', 'Bootstrapping dynamic Nginx proxy...');
 
-    const backupPath = await etcd.get('system/backup_path') || '/data/backup';
+    const localNode = await getLocalNodeConfig();
+    const nodeName = localNode?.name || 'node-1';
+    const backupPath = localNode?.backupPath || '/data/backup';
 
     // Ensure the image exists
     try {
@@ -166,8 +169,12 @@ export async function bootstrapNginx() {
             },
             Binds: [
                 `${backupPath}/nginx/conf.d:/etc/nginx/conf.d`,
+                `/etc/certs/${nodeName}:/etc/nginx/ssl/host:ro`,
                 `${backupPath}/nginx/ssl:/etc/nginx/ssl`
             ],
+            Tmpfs: {
+                '/etc/nginx/ssl/secrets': 'mode=700'
+            },
             RestartPolicy: { Name: 'always' }
         },
         NetworkingConfig: {

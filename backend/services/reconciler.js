@@ -1,6 +1,7 @@
 import docker from './docker.js';
 import { getContainers, updateContainerDockerId, getLocalNodeConfig, getNodes } from './db.js';
 import { addRoute } from './nginx.js';
+import { isNodeSealed } from './secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
 import etcd from './db.js';
 import fs from 'fs';
@@ -216,7 +217,13 @@ export const reconcileContainers = async (localNodeId) => {
   
   try {
     await reconcileCoreDNS(localNodeId);
-    await reconcileDNSVIP(localNodeId);
+    
+    // Only bring up the HA IP and Global services if unsealed
+    if (!isNodeSealed()) {
+      await reconcileDNSVIP(localNodeId);
+    } else {
+      console.log(`[Reconciler] Node ${localNodeId} is sealed. Skipping HA VIP activation.`);
+    }
 
     let savedContainers;
     try {
