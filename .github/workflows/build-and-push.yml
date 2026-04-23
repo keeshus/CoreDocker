@@ -1,0 +1,82 @@
+name: Build and Push to GHCR
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Update package.json versions
+        run: |
+          npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
+          cd backend && npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version && cd ..
+          cd frontend && npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version && cd ..
+
+      - name: Commit package.json version updates
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git commit -a -m "chore: bump versions to ${{ env.VERSION }} [skip ci]" || echo "No changes to commit"
+          git push origin HEAD:${{ github.ref_name }} || echo "Could not push"
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Backend Docker
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+
+      - name: Build and push Backend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ env.VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:latest
+          labels: ${{ steps.meta-backend.outputs.labels }}
+
+      - name: Extract metadata (tags, labels) for Frontend Docker
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+
+      - name: Build and push Frontend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ env.VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest
+          labels: ${{ steps.meta-frontend.outputs.labels }}
