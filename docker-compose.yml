@@ -12,8 +12,8 @@ services:
       - ${NONBACKUP_LOCATION:-./data/nonbackup}:/mnt/non-backup
     environment:
       - ETCD_IMAGE=${ETCD_IMAGE:-gcr.io/etcd-development/etcd:v3.6.8}
-      - NGINX_IMAGE=${NGINX_IMAGE:-nginx:latest}
-      - ALPINE_IMAGE=${ALPINE_IMAGE:-alpine:latest}
+      - NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.25.4-alpine}
+      - ALPINE_IMAGE=${ALPINE_IMAGE:-alpine:3.19}
       - DNS_PRODUCTION=true
       - NODE_DOMAIN=${NODE_DOMAIN:-node-1.local}
       - NODE_IP=${NODE_IP:-127.0.0.1}
@@ -41,8 +41,6 @@ services:
       dockerfile: frontend/Dockerfile
     depends_on:
       - backend
-    ports:
-      - "3000:3000"
     networks:
       - backhaul
     restart: always

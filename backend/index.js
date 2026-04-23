@@ -59,7 +59,6 @@ const bootCluster = async (nodeId) => {
   console.log('[Cluster] Booting services...');
   try {
     startLogger();
-    await bootstrapNginx();
     await reconcileContainers(nodeId);
     startScheduler();
     startOrchestrator(nodeId);
@@ -349,6 +348,9 @@ const startBackend = async () => {
     console.log('[Cluster] Waiting for ETCD to become reachable...');
     await waitForEtcd();
     await registerLocalNode(nodeId, nodeName, nodeIp);
+    
+    // Boot Nginx early so unseal UI is available securely over HTTPS
+    await bootstrapNginx();
     
     if (!isNodeSealed()) {
       await bootCluster(nodeId);
