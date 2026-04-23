@@ -17,7 +17,7 @@ import {closeEtcd, registerLocalNode, waitForEtcd, saveNode} from './services/db
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import {bootstrapNginx} from './services/nginx.js';
-import {startLogger, stopLogger} from './services/logger.js';
+import {startLogger} from './services/logger.js';
 import docker from './services/docker.js';
 import {v4 as uuidv4} from 'uuid';
 import {
@@ -129,8 +129,8 @@ app.get('/system/status', async (req, res) => {
     } catch (err) {}
   }
 
-  let initialized = false;
-  let sealed = true;
+  let initialized;
+  let sealed;
   initialized = await isSystemInitialized();
   sealed = isNodeSealed();
 
@@ -230,19 +230,16 @@ app.post('/system/join', async (req, res) => {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Missing or invalid join token' });
     }
-    const token = authHeader.split(' ')[1];
-    
-    // verify join token here... (skipped for brevity)
-    
+
     const { name, ip } = req.body;
-    
+
     // Add member to ETCD
     const etcdRes = await addEtcdMember(name, ip);
-    
+
     // Save to DB
     const id = uuidv4();
     await saveNode(id, name, ip, 'online');
-    
+
     res.json({ success: true, etcdRes, id });
   } catch (e) {
     res.status(400).json({ error: e.message });

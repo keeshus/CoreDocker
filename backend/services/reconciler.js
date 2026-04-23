@@ -1,5 +1,5 @@
 import docker from './docker.js';
-import { getContainers, updateContainerDockerId, getLocalNodeConfig, getNodes } from './db.js';
+import { getContainers, updateContainerDockerId, getNodes } from './db.js';
 import { addRoute } from './nginx.js';
 import { isNodeSealed } from './secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 
 const SETTINGS_KEY = 'cluster/settings';
+const ALPINE_IMAGE = process.env.ALPINE_IMAGE || 'alpine:latest';
 
 const ensureImage = async (image) => {
   try {
@@ -79,9 +80,9 @@ vrrp_instance VI_DNS {
     } catch (e) {
       if (e.statusCode === 404) {
         console.log('[Reconciler] Creating Keepalived DNS VIP container...');
-        await ensureImage('alpine:latest');
+        await ensureImage(ALPINE_IMAGE);
         container = await docker.createContainer({
-          Image: 'alpine:latest',
+          Image: ALPINE_IMAGE,
           name: containerName,
           Entrypoint: ['sh', '-c', 'apk add --no-cache keepalived && keepalived --dont-fork --log-console'],
           HostConfig: {

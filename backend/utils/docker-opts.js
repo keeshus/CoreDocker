@@ -13,9 +13,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
       HostPort: p.host ? p.host.toString() : ''
     });
   });
-
-  const localNode = await getLocalNodeConfig();
-  
+  await getLocalNodeConfig();
   const binds = (volumes || []).map(v => {
     let hostPath = v.host;
     if (v.type === 'backup' || v.type === 'non-backup') {
@@ -33,7 +31,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
   for (const e of (env || [])) {
     let val = e.value;
     // Check if it's a secret reference
-    const secretMatch = typeof val === 'string' ? val.match(/^\{\{SECRET:(.+)\}\}$/) : null;
+    const secretMatch = typeof val === 'string' ? val.match(/^\{\{SECRET:(.+)}}$/) : null;
     if (secretMatch) {
       const secretKey = secretMatch[1];
       const plaintext = await getSecret(secretKey);
@@ -75,7 +73,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
   }
 
   if (opts.shmSize) {
-    let bytes = 0;
+    let bytes;
     const str = opts.shmSize.toString().toLowerCase().trim();
     if (str.endsWith('g')) bytes = parseInt(str) * 1024 * 1024 * 1024;
     else if (str.endsWith('m')) bytes = parseInt(str) * 1024 * 1024;

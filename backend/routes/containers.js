@@ -234,8 +234,7 @@ router.post('/:id/persist', async (req, res) => {
       if (idx === -1) return { key: e, value: '' };
       return { key: e.substring(0, idx), value: e.substring(idx + 1) };
     });
-
-    const localNode = await getLocalNodeConfig();
+    await getLocalNodeConfig();
     const volumes = [];
     
     // Process Binds

@@ -1,5 +1,4 @@
 import docker from './docker.js';
-import etcd from './db.js';
 
 /**
  * Runs an ephemeral container for a specific task and returns its output.
@@ -73,7 +72,7 @@ export async function writeFileToHost(filePath, content) {
     const fullPath = filePath.startsWith('/') ? filePath : `/data/backup/${filePath}`;
     
     // Strict path validation to prevent command injection and directory traversal
-    if (fullPath.includes('..') || /[\$\&\|\>\<\;]/.test(fullPath)) {
+    if (fullPath.includes('..') || /[$&|><;]/.test(fullPath)) {
         throw new Error('Invalid file path');
     }
 
@@ -94,7 +93,7 @@ export async function writeFileToHost(filePath, content) {
 export async function removeFileFromHost(filePath) {
     const fullPath = filePath.startsWith('/') ? filePath : `/data/backup/${filePath}`;
     
-    if (fullPath.includes('..') || /[\$\&\|\>\<\;]/.test(fullPath)) {
+    if (fullPath.includes('..') || /[$&|><;]/.test(fullPath)) {
         throw new Error('Invalid file path');
     }
 

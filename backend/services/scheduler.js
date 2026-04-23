@@ -162,7 +162,7 @@ export const runTask = async (taskId) => {
             }
             
             const writeStream = fs.createWriteStream(destPath);
-            stream.on('data', chunk => {
+            stream.on('data', () => {
               // Docker multiplexed stream: ignore headers if not using docker-modem demux, but since it's an exec stream we should be careful.
                 // A better way is using runEphemeralTask but ETCD requires connecting to the live ETCD container.
             });
@@ -211,7 +211,7 @@ async function performHASync() {
   // 1. Find all HA containers or groups
   const allContainers = await etcd.getAll('core/containers/').strings();
   const haContainers = Object.entries(allContainers)
-    .map(([key, value]) => JSON.parse(value))
+    .map(([, value]) => JSON.parse(value))
     .filter(c => c.highAvailability);
 
   if (haContainers.length === 0) return { stdout: 'No HA containers found', exitCode: 0 };
@@ -222,7 +222,7 @@ async function performHASync() {
     // This requires knowing the other nodes IPs.
     const nodes = await etcd.getAll('nodes/').strings();
     const otherNodes = Object.entries(nodes)
-        .map(([k, v]) => JSON.parse(v))
+        .map(([, v]) => JSON.parse(v))
         .filter(n => n.id !== nodeId);
 
     for (const targetNode of otherNodes) {

@@ -1,5 +1,4 @@
 import docker from './docker.js';
-import { getLocalNodeConfig } from './db.js';
 
 const ETCD_IMAGE = process.env.ETCD_IMAGE || 'gcr.io/etcd-development/etcd:v3.6.8';
 const CONTAINER_NAME = 'core-docker-etcd';

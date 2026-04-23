@@ -79,9 +79,6 @@ export async function stopLogger() {
  */
 export async function purgeOldLogs() {
     const retentionDays = await etcd.get(LOG_RETENTION_KEY) || DEFAULT_RETENTION_DAYS;
-    const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
-    const logFilePath = `${backupPath}/system-logs.jsonl`;
-
     // This is more complex than a simple 'rm', we need to filter the JSONL.
     // However, for now, we'll implement a simple bash-based logic that could work 
     // or we can just implement the removal of the whole file if it gets too old.

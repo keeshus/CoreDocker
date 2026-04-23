@@ -1,5 +1,5 @@
 import docker from './docker.js';
-import etcd, { getLocalNodeConfig } from './db.js';
+import { getLocalNodeConfig } from './db.js';
 import { runEphemeralTask, writeFileToHost, removeFileFromHost } from './ephemeral-tasks.js';
 import { logEvent } from './logger.js';
 
@@ -8,7 +8,6 @@ const NGINX_LOCATIONS_DIR = 'nginx/conf.d/locations';
 const NGINX_SSL_DIR = 'nginx/ssl';
 
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
-    const isSealed = await etcd.get('system/master_hash').string().then(hash => !hash); // Basic check, better to use isNodeSealed if available
     // Validation
     const domainRegex = /^[a-zA-Z0-9.-]+$/;
     const uriRegex = /^\/[a-zA-Z0-9._\-\/]*$/;
@@ -121,7 +120,7 @@ export async function reloadNginx() {
 
 export async function bootstrapNginx() {
     const CONTAINER_NAME = 'core-docker-proxy';
-    const NGINX_IMAGE = 'nginx:latest';
+    const NGINX_IMAGE = process.env.NGINX_IMAGE || 'nginx:latest';
     
     try {
         const container = docker.getContainer(CONTAINER_NAME);
