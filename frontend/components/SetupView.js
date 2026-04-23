@@ -8,25 +8,19 @@ export default function SetupView({ onSetup }) {
     if (setupMode === 'create') {
       onSetup({
         mode: 'create',
-        password: e.target.password.value,
-        backupPath: e.target.backupPath.value,
-        nonBackupPath: e.target.nonBackupPath.value
+        password: e.target.password.value
       });
     } else if (setupMode === 'join') {
       onSetup({
         mode: 'join',
         primaryIp: e.target.primaryIp.value,
-        joinToken: e.target.joinToken.value,
-        backupPath: e.target.backupPath.value,
-        nonBackupPath: e.target.nonBackupPath.value
+        joinToken: e.target.joinToken.value
       });
     } else if (setupMode === 'restore') {
       onSetup({
         mode: 'restore',
         password: e.target.password.value,
-        snapshotFile: e.target.snapshotFile.files[0],
-        backupPath: e.target.backupPath.value,
-        nonBackupPath: e.target.nonBackupPath.value
+        snapshotFile: e.target.snapshotFile.files[0]
       });
     }
   };
@@ -126,23 +120,6 @@ export default function SetupView({ onSetup }) {
           )}
 
           <hr style={{ border: 'none', borderTop: '1px solid #e2e8f0', margin: '20px 0' }} />
-
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9em', color: '#475569' }}>Backup Storage Location</label>
-          <input 
-            name="backupPath" type="text" defaultValue="/data/backup" required
-            style={{ 
-              width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px', 
-              border: '1px solid #e2e8f0', boxSizing: 'border-box' 
-            }} 
-          />
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9em', color: '#475569' }}>Non-Backup Storage Location</label>
-          <input 
-            name="nonBackupPath" type="text" defaultValue="/data/non-backup" required
-            style={{ 
-              width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px', 
-              border: '1px solid #e2e8f0', boxSizing: 'border-box' 
-            }} 
-          />
 
           <button
             type="submit"

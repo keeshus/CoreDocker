@@ -27,10 +27,8 @@ export const isNodeSealed = () => {
 /**
  * Initialize the system for the first time
  * @param {string} password - The master password
- * @param {string} backupPath - The path for backup persistence
- * @param {string} nonBackupPath - The path for non-backup persistence
  */
-export const initializeSystem = async (password, backupPath = '/data/backup', nonBackupPath = '/data/non-backup') => {
+export const initializeSystem = async (password) => {
   if (await isSystemInitialized()) {
     throw new Error('System is already initialized');
   }
@@ -41,8 +39,8 @@ export const initializeSystem = async (password, backupPath = '/data/backup', no
   await etcd.put(MASTER_KEY_HASH_KEY).value(`${salt}:${hash}`);
 
   // 1.5 Store the system-wide default paths
-  await etcd.put('system/backup_path').value(backupPath);
-  await etcd.put('system/non_backup_path').value(nonBackupPath);
+  await etcd.put('system/backup_path').value(process.env.HOST_BACKUP_PATH || '/data/backup');
+  await etcd.put('system/non_backup_path').value(process.env.HOST_NONBACKUP_PATH || '/data/non-backup');
 
   // 2. Generate a random Data Encryption Key (DEK)
   const dek = crypto.randomBytes(32);

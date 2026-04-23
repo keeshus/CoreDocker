@@ -140,9 +140,7 @@ export const runTask = async (taskId) => {
         await purgeOldLogs();
         taskResult = { stdout: 'Logs purged successfully', exitCode: 0 };
       } else if (taskId === 'etcd-snapshot') {
-        const { getLocalNodeConfig } = await import('./db.js');
-        const localConfig = await getLocalNodeConfig();
-        const backupPath = localConfig?.backupPath || '/data/backup';
+        const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
         const snapshotName = `etcd-snapshot-${new Date().toISOString().replace(/:/g, '-')}.db`;
         const destPath = `${backupPath}/${snapshotName}`;
         

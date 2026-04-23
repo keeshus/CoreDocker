@@ -34,7 +34,7 @@ export async function flushLogs() {
     const logsToFlush = [...logBuffer];
     logBuffer = [];
 
-    const backupPath = await etcd.get('system/backup_path') || '/data/backup';
+    const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
     const logFilePath = `${backupPath}/system-logs.jsonl`;
     
     const logsString = logsToFlush.map(l => JSON.stringify(l)).join('\n') + '\n';
@@ -79,7 +79,7 @@ export async function stopLogger() {
  */
 export async function purgeOldLogs() {
     const retentionDays = await etcd.get(LOG_RETENTION_KEY) || DEFAULT_RETENTION_DAYS;
-    const backupPath = await etcd.get('system/backup_path') || '/data/backup';
+    const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
     const logFilePath = `${backupPath}/system-logs.jsonl`;
 
     // This is more complex than a simple 'rm', we need to filter the JSONL.

@@ -42,18 +42,11 @@ export const bootstrapEtcd = async () => {
 
       console.log(`Using network: ${networkName}`);
 
-      const volumeName = 'core-docker-etcd-data';
+      let backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
       
-      try {
-        await docker.getVolume(volumeName).inspect();
-      } catch (e) {
-        if (e.statusCode === 404) {
-          console.log(`[ETCD] Creating named volume: ${volumeName}`);
-          await docker.createVolume({ Name: volumeName });
-        }
-      }
+      console.log(`[ETCD] Using host bind mount: ${backupPath}/etcd-data`);
 
-      console.log(`[ETCD] Using named volume: ${volumeName}`);
+      const etcdConfigPath = `${backupPath}/etcd/config`;
 
       const createOpts = {
         Image: ETCD_IMAGE,
@@ -77,7 +70,8 @@ export const bootstrapEtcd = async () => {
           User: '0:0',
           RestartPolicy: { Name: 'always' },
           Binds: [
-            `${volumeName}:/etcd-data`
+            `${backupPath}/etcd-data:/etcd-data`,
+            `${etcdConfigPath}:/etc/etcd:ro`
           ]
         },
         NetworkingConfig: {
@@ -91,11 +85,6 @@ export const bootstrapEtcd = async () => {
       await newContainer.start();
       console.log('Initial ETCD container created and start command sent.');
       
-      // Immediate state check
-      const immediate = await newContainer.inspect();
-      console.log(`[ETCD] Container status: ${immediate.State.Status}`);
-      if (immediate.State.Error) console.error(`[ETCD] Start error: ${immediate.State.Error}`);
-
       // Verification of container state
       setTimeout(async () => {
           try {

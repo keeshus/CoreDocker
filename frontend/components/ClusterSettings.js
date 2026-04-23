@@ -10,8 +10,6 @@ export default function ClusterSettings() {
   const [nodes, setNodes] = useState([]);
   const [newNodeName, setNewNodeName] = useState('');
   const [newNodeIp, setNewNodeIp] = useState('');
-  const [newBackupPath, setNewBackupPath] = useState('/data/backup');
-  const [newNonBackupPath, setNewNonBackupPath] = useState('/data/non-backup');
   const [loadingNodes, setLoadingNodes] = useState(true);
 
   // Security Form State
@@ -76,13 +74,11 @@ export default function ClusterSettings() {
       const res = await fetch('/api/nodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newNodeName, ip: newNodeIp, backupPath: newBackupPath, nonBackupPath: newNonBackupPath }),
+        body: JSON.stringify({ name: newNodeName, ip: newNodeIp }),
       });
       if (res.ok) {
         setNewNodeName('');
         setNewNodeIp('');
-        setNewBackupPath('/data/backup');
-        setNewNonBackupPath('/data/non-backup');
         fetchNodes();
       }
     } catch (e) {

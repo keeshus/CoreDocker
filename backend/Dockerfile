@@ -24,13 +24,16 @@ WORKDIR /app
 # Create a non-root user
 RUN addgroup -S nodejs && adduser -S nodejs -G nodejs
 
+WORKDIR /app
+RUN chown nodejs:nodejs /app
+
 # Copy the workspace-specific dependencies and source
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/backend ./backend
-COPY --from=builder /app/package.json ./package.json
+COPY --link --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --link --from=builder --chown=nodejs:nodejs /app/backend ./backend
+COPY --link --from=builder --chown=nodejs:nodejs /app/package.json ./package.json
 
 # Create data directory and set permissions
-RUN mkdir -p /app/data && chown -R nodejs:nodejs /app/data /app/backend /app/node_modules
+RUN mkdir -p /app/data && chown nodejs:nodejs /app/data
 
 # Use the non-root user
 USER nodejs

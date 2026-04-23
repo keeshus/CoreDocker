@@ -160,19 +160,19 @@ async function performPostRestoreMigration() {
   }
 }
 
-async function restoreSystem(snapshotPath, password, backupPath, nonBackupPath) {
+async function restoreSystem(snapshotPath, password) {
   console.log('Restoring from snapshot:', snapshotPath);
-  await initializeSystem(password, backupPath, nonBackupPath); // mock for now
+  await initializeSystem(password); // mock for now
 }
 
 const upload = multer({ dest: '/tmp/uploads/' });
 
 app.post('/system/setup', upload.single('snapshotFile'), async (req, res) => {
   try {
-    const { mode, password, backupPath, nonBackupPath, primaryIp, joinToken } = req.body;
+    const { mode, password, primaryIp, joinToken } = req.body;
     
     if (mode === 'create' || !mode) {
-      await initializeSystem(password, backupPath, nonBackupPath);
+      await initializeSystem(password);
       await registerLocalNode(nodeId, nodeName, nodeIp);
       await bootCluster(nodeId);
     } else if (mode === 'join') {
@@ -183,7 +183,7 @@ app.post('/system/setup', upload.single('snapshotFile'), async (req, res) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${joinToken}`
         },
-        body: JSON.stringify({ name: nodeName, ip: nodeIp, backupPath, nonBackupPath })
+        body: JSON.stringify({ name: nodeName, ip: nodeIp })
       });
       if (!joinRes.ok) {
         throw new Error('Failed to join cluster: ' + await joinRes.text());
@@ -206,7 +206,7 @@ app.post('/system/setup', upload.single('snapshotFile'), async (req, res) => {
       // 3. Overwrite the ETCD named volume
       // 4. Reboot the cluster
       
-      await restoreSystem(snapshotFile.path, password, backupPath, nonBackupPath);
+      await restoreSystem(snapshotFile.path, password);
       await registerLocalNode(nodeId, nodeName, nodeIp);
       await bootCluster(nodeId);
       
@@ -234,14 +234,14 @@ app.post('/system/join', async (req, res) => {
     
     // verify join token here... (skipped for brevity)
     
-    const { name, ip, backupPath, nonBackupPath } = req.body;
+    const { name, ip } = req.body;
     
     // Add member to ETCD
     const etcdRes = await addEtcdMember(name, ip);
     
     // Save to DB
     const id = uuidv4();
-    await saveNode(id, name, ip, 'online', backupPath, nonBackupPath);
+    await saveNode(id, name, ip, 'online');
     
     res.json({ success: true, etcdRes, id });
   } catch (e) {

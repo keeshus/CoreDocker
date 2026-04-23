@@ -7,11 +7,18 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - core-docker-backend-data:/app/data
+      - ${CERTS_LOCATION:-./nginx/ssl}:/etc/certs:ro
+      - ${BACKUP_LOCATION:-./data/backup}:/mnt/backup
+      - ${NONBACKUP_LOCATION:-./data/nonbackup}:/mnt/non-backup
     environment:
       - ETCD_IMAGE=gcr.io/etcd-development/etcd:v3.6.8
       - DNS_PRODUCTION=true
       - NODE_DOMAIN=${NODE_DOMAIN:-node-1.local}
       - NODE_IP=${NODE_IP:-127.0.0.1}
+      - HOST_BACKUP_PATH=${BACKUP_LOCATION:-./data/backup}
+      - HOST_NONBACKUP_PATH=${NONBACKUP_LOCATION:-./data/nonbackup}
+    group_add:
+      - 986 # Host docker group GID
     networks:
       - backhaul
     restart: always

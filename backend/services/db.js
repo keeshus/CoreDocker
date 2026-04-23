@@ -131,8 +131,15 @@ export const getNodes = async () => {
   }
 };
 
-export const saveNode = async (id, name, ip, status = 'offline', backupPath = '/data/backup', nonBackupPath = '/data/non-backup') => {
-  const node = { id, name, ip, status, backupPath, nonBackupPath };
+export const saveNode = async (id, name, ip, status = 'offline') => {
+  const node = {
+    id,
+    name,
+    ip,
+    status,
+    backupPath: process.env.HOST_BACKUP_PATH || '/data/backup',
+    nonBackupPath: process.env.HOST_NONBACKUP_PATH || '/data/non-backup'
+  };
   await db.put(`${NODE_PREFIX}${id}`, node);
 };
 
@@ -157,9 +164,10 @@ export const getLocalNodeConfig = async () => {
   
   // If not found, check if we have system-wide defaults
   if (!localNode) {
-    const backupPath = await etcd.get('system/backup_path').string() || '/data/backup';
-    const nonBackupPath = await etcd.get('system/non_backup_path').string() || '/data/non-backup';
-    return { backupPath, nonBackupPath };
+    return {
+      backupPath: process.env.HOST_BACKUP_PATH || '/data/backup',
+      nonBackupPath: process.env.HOST_NONBACKUP_PATH || '/data/non-backup'
+    };
   }
   
   return localNode;

@@ -17,41 +17,9 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/:id/settings', async (req, res) => {
-  try {
-    const nodes = await getNodes();
-    const node = nodes.find(n => n.id === req.params.id);
-    if (!node) return res.status(404).json({ error: 'Node not found' });
-    
-    res.json({
-      backupPath: node.backupPath || '/data/backup',
-      nonBackupPath: node.nonBackupPath || '/data/non-backup'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/:id/settings', async (req, res) => {
-  try {
-    const { backupPath, nonBackupPath } = req.body;
-    const nodes = await getNodes();
-    const node = nodes.find(n => n.id === req.params.id);
-    if (!node) return res.status(404).json({ error: 'Node not found' });
-
-    node.backupPath = backupPath;
-    node.nonBackupPath = nonBackupPath;
-    
-    await saveNode(node.id, node.name, node.ip, node.status, node.backupPath, node.nonBackupPath);
-    res.json(node);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 router.post('/', async (req, res) => {
   try {
-    const { name, ip, backupPath, nonBackupPath } = req.body;
+    const { name, ip } = req.body;
     const id = uuidv4();
     
     // Attempt to add node to ETCD cluster first
@@ -62,8 +30,8 @@ router.post('/', async (req, res) => {
       // Proceeding with adding node to DB anyway for UI visibility, but status might be degraded
     }
 
-    await saveNode(id, name, ip, 'offline', backupPath, nonBackupPath);
-    res.status(201).json({ id, name, ip, status: 'offline', backupPath, nonBackupPath });
+    await saveNode(id, name, ip, 'offline');
+    res.status(201).json({ id, name, ip, status: 'offline' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

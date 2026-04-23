@@ -247,7 +247,8 @@ router.post('/:id/persist', async (req, res) => {
         
         // Auto-migrate to backup path
         const folderName = containerPath.replace(/^\//, '').replace(/\//g, '_');
-        const newHostPath = `${localNode.backupPath}/${name}/${folderName}`;
+        const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
+        const newHostPath = `${backupPath}/${name}/${folderName}`;
         
         console.log(`Migrating volume ${oldHost} -> ${newHostPath}`);
         try {
@@ -266,7 +267,8 @@ router.post('/:id/persist', async (req, res) => {
       for (const m of inspect.Mounts) {
         if (m.Type === 'volume' && m.Source) {
           const folderName = m.Destination.replace(/^\//, '').replace(/\//g, '_');
-          const newHostPath = `${localNode.backupPath}/${name}/${folderName}`;
+          const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
+          const newHostPath = `${backupPath}/${name}/${folderName}`;
           
           console.log(`Migrating docker volume ${m.Source} -> ${newHostPath}`);
           try {

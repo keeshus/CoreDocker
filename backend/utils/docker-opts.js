@@ -19,7 +19,9 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
   const binds = (volumes || []).map(v => {
     let hostPath = v.host;
     if (v.type === 'backup' || v.type === 'non-backup') {
-      const basePath = v.type === 'backup' ? localNode.backupPath : localNode.nonBackupPath;
+      const basePath = v.type === 'backup' ?
+        (process.env.HOST_BACKUP_PATH || '/data/backup') :
+        (process.env.HOST_NONBACKUP_PATH || '/data/non-backup');
       const folderName = v.host ? `/${v.host}` : '';
       const safeContainerPath = v.container.replace(/^\//, '').replace(/\//g, '_');
       hostPath = `${basePath}/${name}${folderName ? folderName : '/' + safeContainerPath}`;

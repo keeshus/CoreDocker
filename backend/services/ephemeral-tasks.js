@@ -22,8 +22,8 @@ export async function runEphemeralTask(image, cmd, options = {}) {
         }
 
         // Get configured paths for mounts if not provided
-        const backupPath = await etcd.get('system/backup_path') || '/data/backup';
-        const nonBackupPath = await etcd.get('system/non_backup_path') || '/data/non-backup';
+        const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
+        const nonBackupPath = process.env.HOST_NONBACKUP_PATH || '/data/non-backup';
 
         const defaultHostConfig = {
             Binds: [

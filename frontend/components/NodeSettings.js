@@ -4,10 +4,7 @@ import ContainerRow from './ContainerRow';
 export default function NodeSettings({ systemContainers = [], stats = {} }) {
   const [nodes, setNodes] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState('');
-  const [settings, setSettings] = useState({ backupPath: '', nonBackupPath: '' });
   const [loadingNodes, setLoadingNodes] = useState(true);
-  const [loadingSettings, setLoadingSettings] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [expandedContainer, setExpandedContainer] = useState(null);
 
   useEffect(() => {
@@ -25,45 +22,6 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
         setLoadingNodes(false);
       });
   }, []);
-
-  useEffect(() => {
-    if (selectedNodeId) {
-      setLoadingSettings(true);
-      fetch(`/api/nodes/${selectedNodeId}/settings`)
-        .then(res => res.json())
-        .then(data => {
-          setSettings(data);
-          setLoadingSettings(false);
-        })
-        .catch(e => {
-          console.error('Failed to load node settings:', e);
-          setLoadingSettings(false);
-        });
-    }
-  }, [selectedNodeId]);
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (!selectedNodeId) return;
-    
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/nodes/${selectedNodeId}/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
-      if (res.ok) {
-        alert('Node settings saved successfully!');
-      } else {
-        const error = await res.json();
-        alert('Error saving node settings: ' + JSON.stringify(error));
-      }
-    } catch (e) {
-      alert('Error saving node settings: ' + e.message);
-    }
-    setSaving(false);
-  };
 
   if (loadingNodes) return <div>Loading nodes...</div>;
 
@@ -112,45 +70,9 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
         </div>
       )}
 
-      {loadingSettings ? (
-        <div>Loading node settings...</div>
-      ) : selectedNodeId ? (
+      {selectedNodeId ? (
         <>
-          <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '600px', marginTop: '20px' }}>
-            <div>
-              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Backup Path</label>
-              <input 
-                type="text" 
-                value={settings.backupPath} 
-                onChange={e => setSettings({...settings, backupPath: e.target.value})}
-                placeholder="e.g. /data/backup"
-                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-              />
-              <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Path where persistent data is backed up.</small>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Non-Backup Path</label>
-              <input 
-                type="text" 
-                value={settings.nonBackupPath} 
-                onChange={e => setSettings({...settings, nonBackupPath: e.target.value})}
-                placeholder="e.g. /data/non-backup"
-                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-              />
-              <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Path for temporary or non-essential data.</small>
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={saving}
-              style={{ padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', width: 'fit-content' }}
-            >
-              {saving ? 'Saving...' : 'Save Node Settings'}
-            </button>
-          </form>
-
-          <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
+          <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
             <h3 style={{ marginTop: 0 }}>System Containers on {selectedNode?.name}</h3>
             <p style={{ color: '#64748b', fontSize: '0.9em' }}>Monitor core application containers running on this node.</p>
             

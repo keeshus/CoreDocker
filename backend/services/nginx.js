@@ -1,6 +1,6 @@
 import docker from './docker.js';
 import etcd, { getLocalNodeConfig } from './db.js';
-import { writeFileToHost, removeFileFromHost } from './ephemeral-tasks.js';
+import { runEphemeralTask, writeFileToHost, removeFileFromHost } from './ephemeral-tasks.js';
 import { logEvent } from './logger.js';
 
 const NGINX_CONF_DIR = 'nginx/conf.d';
@@ -139,7 +139,7 @@ export async function bootstrapNginx() {
 
     const localNode = await getLocalNodeConfig();
     const nodeName = localNode?.name || 'node-1';
-    const backupPath = localNode?.backupPath || '/data/backup';
+    const backupPath = localNode?.backupPath || process.env.HOST_BACKUP_PATH || '/data/backup';
 
     // Ensure the image exists
     try {
@@ -149,6 +149,34 @@ export async function bootstrapNginx() {
         await new Promise((resolve, reject) => {
             docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
         });
+    }
+    
+    // Check if host certificates exist (now expected at /etc/certs mounted from Compose)
+    const hostCertPath = '/etc/certs';
+    const certsExist = await runEphemeralTask('alpine', ['ls', `${hostCertPath}/fullchain.pem`], {
+        HostConfig: { Binds: [`${hostCertPath}:${hostCertPath}:ro`] }
+    }).then(res => res.exitCode === 0).catch(() => false);
+
+    const binds = [
+        `${backupPath}/nginx/conf.d:/etc/nginx/conf.d`,
+        `${backupPath}/nginx/ssl:/etc/nginx/ssl`
+    ];
+
+    if (certsExist) {
+        binds.push(`${hostCertPath}:/etc/nginx/ssl/host:ro`);
+    } else {
+        logEvent('nginx', 'warn', `No host certificates found at ${hostCertPath}, generating self-signed...`);
+        const selfSignedPath = `${backupPath}/nginx/ssl/host`;
+        await runEphemeralTask('alpine', [
+            'sh', '-c',
+            `apk add --no-cache openssl && \
+             mkdir -p ${selfSignedPath} && \
+             openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+             -keyout ${selfSignedPath}/privkey.pem \
+             -out ${selfSignedPath}/fullchain.pem \
+             -subj "/CN=${nodeName}.local"`
+        ]);
+        binds.push(`${selfSignedPath}:/etc/nginx/ssl/host:ro`);
     }
 
     const networks = await docker.listNetworks();
@@ -167,11 +195,7 @@ export async function bootstrapNginx() {
                 '80/tcp': [{ HostPort: '80' }],
                 '443/tcp': [{ HostPort: '443' }]
             },
-            Binds: [
-                `${backupPath}/nginx/conf.d:/etc/nginx/conf.d`,
-                `/etc/certs/${nodeName}:/etc/nginx/ssl/host:ro`,
-                `${backupPath}/nginx/ssl:/etc/nginx/ssl`
-            ],
+            Binds: binds,
             Tmpfs: {
                 '/etc/nginx/ssl/secrets': 'mode=700'
             },
