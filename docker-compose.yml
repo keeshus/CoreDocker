@@ -6,7 +6,6 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - core-docker-backend-data:/app/data
       - ${CERTS_LOCATION:-./nginx/ssl}:/etc/certs:ro
       - ${BACKUP_LOCATION:-./data/backup}:/mnt/backup
       - ${NONBACKUP_LOCATION:-./data/nonbackup}:/mnt/non-backup
@@ -59,7 +58,3 @@ networks:
     name: web-proxy
   backhaul:
     name: backhaul
-
-volumes:
-  core-docker-backend-data:
-    name: core-docker-backend-data
