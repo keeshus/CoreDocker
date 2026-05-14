@@ -43,26 +43,26 @@ const mockDbDefault = {
   })),
 };
 
-vi.mock('../services/db.js', () => ({
+vi.mock('../../backend/services/db.js', () => ({
   default: mockDbDefault,
   getContainers: vi.fn().mockResolvedValue([]),
   getNodes: vi.fn().mockResolvedValue([]),
   saveContainer: vi.fn().mockResolvedValue(),
 }));
 
-vi.mock('../services/logger.js', () => ({
+vi.mock('../../backend/services/logger.js', () => ({
   logEvent: vi.fn(),
   purgeOldLogs: vi.fn(),
 }));
 
-vi.mock('../services/ephemeral-tasks.js', () => ({
+vi.mock('../../backend/services/ephemeral-tasks.js', () => ({
   runEphemeralTask: vi.fn().mockResolvedValue({ stdout: 'done', exitCode: 0 }),
 }));
 
 const {
   startScheduler, stopScheduler, getTask, getAllTasks,
   updateTask, runTask,
-} = await import('../services/scheduler.js');
+} = await import('../../backend/services/scheduler.js');
 
 beforeEach(() => {
   for (const key of Object.keys(etcdStore)) {

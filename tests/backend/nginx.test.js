@@ -1,19 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../services/docker.js', () => ({ default: {} }));
-vi.mock('../services/db.js', () => ({
+vi.mock('../../backend/services/docker.js', () => ({ default: {} }));
+vi.mock('../../backend/services/db.js', () => ({
   getLocalNodeConfig: vi.fn().mockResolvedValue({}),
 }));
-vi.mock('../services/ephemeral-tasks.js', () => ({
+vi.mock('../../backend/services/ephemeral-tasks.js', () => ({
   runEphemeralTask: vi.fn().mockResolvedValue({ stdout: '', exitCode: 0 }),
   writeFileToHost: vi.fn().mockResolvedValue(),
   removeFileFromHost: vi.fn().mockResolvedValue(),
 }));
-vi.mock('../services/logger.js', () => ({
+vi.mock('../../backend/services/logger.js', () => ({
   logEvent: vi.fn(),
 }));
 
-const { addRoute, removeRoute, reloadNginx } = await import('../services/nginx.js');
+const { addRoute, removeRoute, reloadNginx } = await import('../../backend/services/nginx.js');
 
 describe('addRoute - validation', () => {
   beforeEach(() => {
@@ -69,7 +69,7 @@ describe('removeRoute', () => {
 
 describe('reloadNginx', () => {
   it('handles no nginx container gracefully', async () => {
-    const { default: mockDocker } = await import('../services/docker.js');
+    const { default: mockDocker } = await import('../../backend/services/docker.js');
     mockDocker.listContainers = vi.fn().mockResolvedValue([]);
     await expect(reloadNginx()).resolves.toBeUndefined();
   });

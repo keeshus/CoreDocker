@@ -28,7 +28,7 @@ const mockDbDefault = {
   }),
 };
 
-vi.mock('../services/db.js', () => ({
+vi.mock('../../backend/services/db.js', () => ({
   default: mockDbDefault,
 }));
 
@@ -43,7 +43,7 @@ beforeEach(() => {
 });
 
 function module() {
-  return import('../services/secrets.js');
+  return import('../../backend/services/secrets.js');
 }
 
 describe('validatePasswordStrength', () => {

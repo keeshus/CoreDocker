@@ -13,7 +13,7 @@ const mockDb = {
   }),
 };
 
-vi.mock('../services/db.js', () => {
+vi.mock('../../backend/services/db.js', () => {
   const mockEtcd = {
     put: vi.fn().mockReturnThis(),
     get: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock('../services/db.js', () => {
   };
 });
 
-const { runOrchestrationLoop } = await import('../services/orchestrator.js');
+const { runOrchestrationLoop } = await import('../../backend/services/orchestrator.js');
 
 beforeEach(() => {
   testContainers.length = 0;

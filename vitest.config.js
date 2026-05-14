@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['backend/__tests__/**/*.test.js', 'frontend/__tests__/**/*.test.js'],
+    include: ['tests/backend/**/*.test.js', 'tests/frontend/**/*.test.js'],
     setupFiles: [],
   },
 });

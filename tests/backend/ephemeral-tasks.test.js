@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockDocker = {};
-vi.mock('../services/docker.js', () => ({ default: mockDocker }));
+vi.mock('../../backend/services/docker.js', () => ({ default: mockDocker }));
 
 vi.mock('fs/promises', () => ({
   mkdir: vi.fn().mockResolvedValue(),
@@ -13,7 +13,7 @@ vi.mock('fs', () => ({}));
 
 const {
   validatePath, demuxDockerLogs, writeFileToHost, removeFileFromHost,
-} = await import('../services/ephemeral-tasks.js');
+} = await import('../../backend/services/ephemeral-tasks.js');
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -3,15 +3,15 @@ import { describe, it, expect, vi } from 'vitest';
 const mockGetSecret = vi.fn();
 const mockGetLocalNodeConfig = vi.fn();
 
-vi.mock('../services/db.js', () => ({
+vi.mock('../../backend/services/db.js', () => ({
   getLocalNodeConfig: () => mockGetLocalNodeConfig(),
 }));
 
-vi.mock('../services/secrets.js', () => ({
+vi.mock('../../backend/services/secrets.js', () => ({
   getSecret: (key) => mockGetSecret(key),
 }));
 
-const { buildCreateOpts } = await import('../utils/docker-opts.js');
+const { buildCreateOpts } = await import('../../backend/utils/docker-opts.js');
 
 beforeEach(() => {
   vi.clearAllMocks();

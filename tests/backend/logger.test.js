@@ -5,7 +5,7 @@ const mockEtcd = {
   get: vi.fn(),
 };
 
-vi.mock('../services/db.js', () => ({
+vi.mock('../../backend/services/db.js', () => ({
   default: {
     get: (key) => ({
       string: () => Promise.resolve(mockEtcd.store[key] || null),
@@ -35,7 +35,7 @@ vi.mock('fs/promises', () => ({
   ...mockFsp,
 }));
 
-const { logEvent, startLogger, stopLogger, flushLogs, purgeOldLogs } = await import('../services/logger.js');
+const { logEvent, startLogger, stopLogger, flushLogs, purgeOldLogs } = await import('../../backend/services/logger.js');
 
 beforeEach(() => {
   mockEtcd.store = {};

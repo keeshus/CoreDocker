@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockDocker = {};
-vi.mock('../services/docker.js', () => ({ default: mockDocker }));
-vi.mock('../services/db.js', () => ({
+vi.mock('../../backend/services/docker.js', () => ({ default: mockDocker }));
+vi.mock('../../backend/services/db.js', () => ({
   getContainers: vi.fn(),
   getNodes: vi.fn(),
   default: {
@@ -12,16 +12,16 @@ vi.mock('../services/db.js', () => ({
     getAll: vi.fn(),
   },
 }));
-vi.mock('../services/nginx.js', () => ({
+vi.mock('../../backend/services/nginx.js', () => ({
   addRoute: vi.fn(),
   removeRoute: vi.fn(),
 }));
-vi.mock('../services/secrets.js', () => ({
+vi.mock('../../backend/services/secrets.js', () => ({
   isNodeSealed: vi.fn().mockReturnValue(false),
   generateClusterToken: vi.fn().mockReturnValue('mock-token'),
 }));
 
-await import('../routes/containers.js');
+await import('../../backend/routes/containers.js');
 
 const validateContainerInput = (() => {
   const IMAGE_NAME_RE = /^[a-zA-Z0-9._\-\/]+(:[a-zA-Z0-9._-]+)?$/;

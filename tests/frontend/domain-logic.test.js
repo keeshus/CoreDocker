@@ -7,7 +7,7 @@ import {
   filterContainersByNode,
   validatePasswordChange,
   parseHaAllowedNodes,
-} from '../lib/domain-logic';
+} from '../../frontend/lib/domain-logic';
 
 // ---------------------------------------------------------------------------
 // calculateCPU

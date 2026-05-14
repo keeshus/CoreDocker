@@ -61,15 +61,14 @@ const mockSecrets = {
   }),
 };
 
-vi.mock('../services/secrets.js', () => mockSecrets);
-
+vi.mock('../../backend/services/secrets.js', () => mockSecrets);
 const {
   closeEtcd, recreateEtcdClient, waitForEtcd,
   registerLocalNode, getNodes, saveNode, deleteNode,
   getLocalNodeConfig, getContainers, getContainerByName,
   saveContainer, updateContainerDockerId, deleteContainer,
   getGroups, saveGroup, deleteGroup,
-} = await import('../services/db.js');
+} = await import('../../backend/services/db.js');
 
 beforeEach(() => {
   for (const key of Object.keys(etcdStore)) {
