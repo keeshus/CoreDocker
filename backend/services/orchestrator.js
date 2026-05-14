@@ -3,7 +3,7 @@ import { getContainers, getNodes, saveContainer } from './db.js';
 
 const ORCHESTRATOR_LOCK_KEY = 'leader/orchestrator';
 
-const runOrchestrationLoop = async () => {
+export const runOrchestrationLoop = async () => {
   console.log('[Orchestrator] Running HA scheduling evaluation...');
   try {
     const nodes = await getNodes();

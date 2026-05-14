@@ -7,7 +7,7 @@ const NONBACKUP_MOUNT = '/mnt/non-backup';
 
 const SAFE_PATH_RE = /^[a-zA-Z0-9_\/\-.]+$/;
 
-function validatePath(p) {
+export function validatePath(p) {
   if (p.includes('..')) {
     throw new Error('Path traversal detected');
   }
@@ -66,14 +66,14 @@ export async function runEphemeralTask(image, cmd, options = {}) {
   }
 }
 
-function demuxDockerLogs(buffer) {
+export function demuxDockerLogs(buffer) {
   let stdout = '';
   let stderr = '';
   let offset = 0;
   while (offset < buffer.length) {
     if (offset + 8 > buffer.length) break;
     const streamType = buffer[offset];
-    const frameLength = buffer.readUInt32BE(4);
+    const frameLength = buffer.readUInt32BE(offset + 4);
     offset += 8;
     if (offset + frameLength > buffer.length) break;
     const frame = buffer.toString('utf8', offset, offset + frameLength);

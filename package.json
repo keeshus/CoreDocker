@@ -14,7 +14,8 @@
     "frontend:start": "npm run start -w frontend"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "vitest": "^4.1.6"
   },
   "type": "module"
 }
