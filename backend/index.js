@@ -21,6 +21,8 @@ import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import {bootstrapNginx} from './services/nginx.js';
 import {startLogger} from './services/logger.js';
 import docker from './services/docker.js';
+import {runMigrations} from './services/migrations.js';
+import migrations from './migrations/index.js';
 import {v4 as uuidv4} from 'uuid';
 import {
   changeMasterPassword,
@@ -99,6 +101,7 @@ const bootCluster = async (nodeId) => {
     startOrchestrator(nodeId);
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
+    await runMigrations(migrations);
   } catch (e) {
     console.error(`[Cluster] Boot failed: ${e.message}`);
   }
@@ -178,17 +181,8 @@ app.get('/api/system/status', async (req, res) => {
 import multer from 'multer';
 
 async function performPostRestoreMigration() {
-  const { getContainers, saveContainer } = await import('./services/db.js');
-  const containers = await getContainers();
-
-  for (const c of containers) {
-    if (c.ha && c.ha_allowed_nodes && c.ha_allowed_nodes.length > 0) {
-      c.status = 'error: missing-pinned-node';
-    } else {
-      c.status = 'stopped';
-    }
-    await saveContainer(c.id, c.name, c.config, c.status, null, null);
-  }
+  console.log('[Restore] Running pending migrations...');
+  await runMigrations(migrations);
 }
 
 async function restoreSystem(snapshotPath, password) {
