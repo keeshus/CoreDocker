@@ -1,25 +1,8 @@
 import React from 'react';
 import ContainerLogs from './ContainerLogs';
+import { calculateCPU, calculateMemory, getExitCodeDescription } from '../lib/domain-logic';
 
 export default function ContainerRow({ container, stats, isExpanded, onToggle, onEdit, onPersist, onDelete, isSystem = false }) {
-  const calculateCPU = (cpuStats) => {
-    if (!cpuStats || !cpuStats.cpu_usage || !cpuStats.precpu_usage) return '0.00%';
-    const cpuDelta = cpuStats.cpu_usage.total_usage - cpuStats.precpu_usage.total_usage;
-    const systemDelta = cpuStats.system_cpu_usage - cpuStats.precpu_usage.system_cpu_usage;
-    const onlineCPUs = cpuStats.online_cpus || 1;
-    if (systemDelta > 0 && cpuDelta > 0) {
-      return ((cpuDelta / systemDelta) * onlineCPUs * 100.0).toFixed(2) + '%';
-    }
-    return '0.00%';
-  };
-
-  const calculateMemory = (memStats) => {
-    if (!memStats || !memStats.usage || !memStats.limit) return '0.00%';
-    const usage = memStats.usage / 1024 / 1024;
-    const limit = memStats.limit / 1024 / 1024;
-    return `${usage.toFixed(2)} MB / ${limit.toFixed(2)} MB (${((usage / limit) * 100).toFixed(2)}%)`;
-  };
-
   return (
     <>
       <tr 
@@ -114,14 +97,7 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle, o
                   <strong>Exit Code:</strong> {container.StateDetails?.ExitCode ?? '-'}
                   {container.StateDetails?.ExitCode !== 0 && container.StateDetails?.ExitCode !== undefined && (
                     <div style={{ fontSize: '0.85em', color: '#991b1b', marginTop: '5px' }}>
-                      {container.StateDetails?.ExitCode === 1 && '⚠ 1: Generic error / Application failure'}
-                      {container.StateDetails?.ExitCode === 126 && '✖ 126: Command invoked cannot execute'}
-                      {container.StateDetails?.ExitCode === 127 && '✖ 127: Command not found'}
-                      {container.StateDetails?.ExitCode === 130 && '⏹ 130: Container terminated by Ctrl+C'}
-                      {container.StateDetails?.ExitCode === 137 && '⏹ 137: Container received SIGKILL (e.g. OOM or forced stop)'}
-                      {container.StateDetails?.ExitCode === 139 && '✖ 139: Segmentation fault'}
-                      {container.StateDetails?.ExitCode === 143 && '⏹ 143: Container received SIGTERM (graceful stop)'}
-                      {![1, 126, 127, 130, 137, 139, 143].includes(container.StateDetails.ExitCode) && 'ℹ Non-zero exit code: check logs for details.'}
+                      {getExitCodeDescription(container.StateDetails.ExitCode) || 'ℹ Non-zero exit code: check logs for details.'}
                     </div>
                   )}
                 </div>

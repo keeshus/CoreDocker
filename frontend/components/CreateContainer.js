@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { buildContainerPayload, parseEnvFromInitialData, parseHaAllowedNodes } from '../lib/domain-logic';
 
 export default function CreateContainer({ onCreated, initialData = null, onClose = null, isOpenMode = false }) {
   const [isOpen, setIsOpen] = useState(isOpenMode);
@@ -46,13 +47,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
 
   useEffect(() => {
     if (initialData) {
-      const parsedEnv = (initialData.env || []).map(e => {
-        const secretMatch = e.value?.match(/^\{\{SECRET:(.+)\}\}$/);
-        if (secretMatch) {
-          return { key: e.key, value: secretMatch[1], isSecret: true };
-        }
-        return { ...e, isSecret: false };
-      });
+      const parsedEnv = parseEnvFromInitialData(initialData.env);
 
       setFormData({
         ...defaultFormData,
@@ -105,30 +100,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     e.preventDefault();
     setLoading(true);
     
-    // Clean up empty fields
-    const payload = {
-      ...formData,
-      env: formData.env
-        .filter(e => e.key && e.value)
-        .map(e => ({
-          key: e.key,
-          value: e.isSecret ? `{{SECRET:${e.value}}}` : e.value
-        })),
-      volumes: formData.volumes.filter(v => (v.type !== 'custom' || v.host) && v.container),
-      ports: formData.ports.filter(p => p.container).map(p => ({
-        ...p,
-        host: p.host ? parseInt(p.host, 10) : null,
-        container: parseInt(p.container, 10)
-      })),
-      resources: {
-        cpu: formData.resources.cpu ? parseFloat(formData.resources.cpu) : null,
-        memory: formData.resources.memory ? parseInt(formData.resources.memory, 10) : null,
-      }
-    };
-
-    if (payload.proxy.enabled) {
-      payload.proxy.port = parseInt(payload.proxy.port, 10);
-    }
+    const payload = buildContainerPayload(formData);
 
     try {
       const url = initialData ? `/api/containers/${initialData.dockerId}` : '/api/containers';
@@ -432,7 +404,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                           type="text" 
                           placeholder="e.g. node-1,node-2" 
                           value={formData.ha_allowed_nodes.join(',')} 
-                          onChange={e => setFormData({...formData, ha_allowed_nodes: e.target.value.split(',').map(s => s.trim()).filter(Boolean)})} 
+                          onChange={e => setFormData({...formData, ha_allowed_nodes: parseHaAllowedNodes(e.target.value)})} 
                           style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
                         />
                       </div>

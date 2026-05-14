@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import ContainerRow from './ContainerRow';
+import { filterContainersByNode } from '../lib/domain-logic';
 
 export default function NodeSettings({ systemContainers = [], stats = {} }) {
   const [nodes, setNodes] = useState([]);
@@ -27,20 +28,7 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
   
-  const filteredSystemContainers = systemContainers.filter(c => {
-    if (selectedNode) {
-      const containerNode = c.current_node || '';
-      const nameMatch = c.Names[0].includes(selectedNode.name);
-      // Treat 'master' as the first node in the cluster if it's node-1
-      const isMasterNodeMatch = containerNode === 'master' && selectedNode.name === 'node-1';
-      
-      return containerNode === selectedNode.name || 
-             containerNode === selectedNode.id ||
-             nameMatch ||
-             isMasterNodeMatch;
-    }
-    return true;
-  });
+  const filteredSystemContainers = filterContainersByNode(systemContainers, selectedNode);
 
   return (
     <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>

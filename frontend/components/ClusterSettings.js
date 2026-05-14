@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Plus, Trash2 } from 'lucide-react';
+import { validatePasswordChange } from '../lib/domain-logic';
 
 export default function ClusterSettings() {
   const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '', dnsVip: '', clusterDomain: '', clusterVip: '' });
@@ -98,8 +99,9 @@ export default function ClusterSettings() {
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
-    if (passwords.next !== passwords.confirm) {
-      alert("New passwords don't match!");
+    const validation = validatePasswordChange(passwords);
+    if (!validation.valid) {
+      alert(validation.error);
       return;
     }
     setIsChangingPassword(true);
