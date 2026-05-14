@@ -8,7 +8,7 @@ router.get('/', async (req, res) => {
     const info = await docker.info();
     res.json(info);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch docker info', details: error.message });
+    res.status(500).json({ error: 'Failed to fetch docker info', details: error.message, code: 'INFO_FAILED' });
   }
 });
 

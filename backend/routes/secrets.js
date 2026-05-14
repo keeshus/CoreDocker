@@ -8,17 +8,20 @@ router.get('/', async (req, res) => {
     const keys = await getAllSecretKeys();
     res.json(keys);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'SECRETS_LIST_FAILED' });
   }
 });
 
 router.post('/', async (req, res) => {
   try {
     const { key, value } = req.body;
+    if (!key || !value) {
+      return res.status(400).json({ error: 'Key and value are required', code: 'VALIDATION_ERROR' });
+    }
     await setSecret(key, value);
     res.status(201).json({ key });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'SECRET_CREATE_FAILED' });
   }
 });
 
@@ -27,7 +30,7 @@ router.delete('/:key', async (req, res) => {
     await deleteSecret(req.params.key);
     res.status(204).end();
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'SECRET_DELETE_FAILED' });
   }
 });
 

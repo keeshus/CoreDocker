@@ -3,7 +3,14 @@ import os from 'os';
 import { isNodeSealed, encrypt, decrypt } from './secrets.js';
 
 const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379'];
-let etcd = new Etcd3({ hosts: etcdHosts });
+const etcdUsername = process.env.ETCD_USERNAME || undefined;
+const etcdPassword = process.env.ETCD_PASSWORD || undefined;
+
+let etcdOptions = { hosts: etcdHosts };
+if (etcdUsername && etcdPassword) {
+  etcdOptions.auth = { username: etcdUsername, password: etcdPassword };
+}
+let etcd = new Etcd3(etcdOptions);
 
 export const closeEtcd = () => {
   console.log('[DB] Closing ETCD connection...');
@@ -11,11 +18,11 @@ export const closeEtcd = () => {
 };
 
 /**
- * CoreDB Wrapper to handle encryption for keys starting with 'core/'
+ * CoreDB Wrapper to handle encryption for secrets only
  */
 class CoreDB {
   _shouldEncrypt(key) {
-    return key.startsWith('core/') || key.startsWith('secrets/');
+    return key.startsWith('core/secrets/') || key.startsWith('secrets/');
   }
 
   _processValue(key, value, decrypting = false) {
@@ -58,25 +65,27 @@ class CoreDB {
 
 const db = new CoreDB();
 
+export const recreateEtcdClient = () => {
+  try {
+    etcd.close();
+  } catch (e) {}
+  etcd = new Etcd3(etcdOptions);
+};
+
 export const waitForEtcd = async (retries = 60, delay = 2000) => {
   const host = etcdHosts[0];
   console.log(`Connecting to ETCD at ${host}...`);
   for (let i = 0; i < retries; i++) {
     try {
-      // Simple operation to check connection
       await etcd.put('connection-test').value(Date.now().toString());
       console.log('Successfully connected to ETCD.');
       return true;
     } catch (e) {
       console.error(`ETCD connection attempt ${i + 1} failed: ${e.message}`);
-      
+
       if (i === retries - 1) throw new Error(`Could not connect to ETCD after ${retries} attempts: ${e.message}`);
-      
-      // Force client to clear any cached DNS/connections by recreating it
-      try {
-        etcd.close();
-        etcd = new Etcd3({ hosts: [host] });
-      } catch (ce) {}
+
+      recreateEtcdClient();
 
       await new Promise(resolve => setTimeout(resolve, delay));
     }
@@ -174,8 +183,13 @@ export const getLocalNodeConfig = async () => {
 };
 
 export const getContainers = async () => {
-  const allContainers = await db.getAll(PREFIX);
-  return Object.values(allContainers);
+  try {
+    const allContainers = await etcd.getAll().prefix(PREFIX).strings();
+    return Object.values(allContainers).map(v => { try { return JSON.parse(v); } catch (e) { return null; } }).filter(Boolean);
+  } catch (e) {
+    console.error(`Failed to get containers from ETCD: ${e.message}`);
+    return [];
+  }
 };
 export const getContainerByName = async (name) => {
   const containers = await getContainers();
@@ -184,18 +198,21 @@ export const getContainerByName = async (name) => {
 
 export const saveContainer = async (id, name, config, status, docker_id = null, current_node = null) => {
   const container = { id, name, config, status, docker_id, current_node };
-  await db.put(`${PREFIX}${id}`, container);
+  const key = `${PREFIX}${id}`;
+  const plaintextValue = JSON.stringify(container);
+  await etcd.put(key).value(plaintextValue);
 };
 
 export const updateContainerDockerId = async (id, docker_id) => {
-  const c = await db.get(`${PREFIX}${id}`);
-  if (c) {
+  const raw = await etcd.get(`${PREFIX}${id}`).string();
+  if (raw) {
+    const c = JSON.parse(raw);
     c.docker_id = docker_id;
-    await db.put(`${PREFIX}${id}`, c);
+    await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(c));
   }
 };
 export const deleteContainer = async (id) => {
-  await db.delete(`${PREFIX}${id}`);
+  await etcd.delete().key(`${PREFIX}${id}`);
 };
 
 export const getGroups = async () => {

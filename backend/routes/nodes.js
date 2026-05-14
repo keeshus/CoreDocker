@@ -8,32 +8,30 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const nodes = await getNodes();
-    // Return all nodes. We trust the frontend to show status based on lastSeen.
-    // If a node was manually registered it should always show up.
-    // Heartbeat-only nodes will eventually be cleaned up by ETCD lease.
     res.json(nodes);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'NODES_LIST_FAILED' });
   }
 });
 
 router.post('/', async (req, res) => {
   try {
     const { name, ip } = req.body;
+    if (!name || !ip) {
+      return res.status(400).json({ error: 'Name and IP are required', code: 'VALIDATION_ERROR' });
+    }
     const id = uuidv4();
-    
-    // Attempt to add node to ETCD cluster first
+
     try {
       await addEtcdMember(name, ip);
     } catch (etcdError) {
       console.warn(`Could not add ETCD member: ${etcdError.message}`);
-      // Proceeding with adding node to DB anyway for UI visibility, but status might be degraded
     }
 
     await saveNode(id, name, ip, 'offline');
     res.status(201).json({ id, name, ip, status: 'offline' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'NODE_CREATE_FAILED' });
   }
 });
 
@@ -42,7 +40,7 @@ router.delete('/:id', async (req, res) => {
     await deleteNode(req.params.id);
     res.status(204).end();
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'NODE_DELETE_FAILED' });
   }
 });
 

@@ -3,6 +3,8 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import containerRoutes from './routes/containers.js';
 import infoRoutes from './routes/info.js';
 import eventRoutes from './routes/events.js';
@@ -28,24 +30,57 @@ import {
   rotateDEK,
   unsealNode,
   verifyClusterToken,
+  getOrCreateJwtSecret,
 } from './services/secrets.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Use a random secret for the JWT to ensure sessions are invalidated on restart
-const JWT_SECRET = crypto.randomBytes(64).toString('hex');
-
+let JWT_SECRET = null;
 const nodeId = process.env.NODE_ID || uuidv4();
 const nodeName = process.env.NODE_NAME || 'node-1';
-
 const nodeIp = process.env.NODE_IP || '127.0.0.1';
+let clusterBooted = false;
 
 app.use(helmet());
 app.use(cookieParser());
 app.use(express.json());
 
-let clusterBooted = false;
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || true,
+  credentials: true,
+}));
+
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts, try again later' },
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, try again later' },
+});
+
+app.use('/api/system', authLimiter);
+
+app.use('/api', generalLimiter);
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    nodeId,
+    nodeName,
+    sealed: isNodeSealed(),
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
 
 const bootCluster = async (nodeId) => {
   if (clusterBooted) {
@@ -69,59 +104,57 @@ const bootCluster = async (nodeId) => {
   }
 };
 
-// Auth Middleware
 const requireAuth = (req, res, next) => {
+  if (!JWT_SECRET) {
+    return res.status(503).json({ error: 'JWT secret not yet initialized', code: 'SERVICE_NOT_READY' });
+  }
   const token = req.cookies.token;
   const authHeader = req.headers.authorization;
 
-  // Check for cluster token first
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const clusterToken = authHeader.split(' ')[1];
     try {
       req.clusterNode = verifyClusterToken(clusterToken);
       return next();
     } catch (err) {
-      // Fall through to regular cookie check
     }
   }
 
-  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  if (!token) return res.status(401).json({ error: 'Authentication required', code: 'AUTH_REQUIRED' });
 
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch (err) {
-    res.status(401).json({ error: 'Invalid or expired session' });
+    res.status(401).json({ error: 'Invalid or expired session', code: 'INVALID_TOKEN' });
   }
 };
 
-// Unseal Middleware
 const requireUnsealed = (req, res, next) => {
   if (isNodeSealed()) {
     return res.status(423).json({
       error: 'Node is sealed',
+      code: 'NODE_SEALED',
       nodeId,
       nodeName,
-      sealed: true
+      sealed: true,
     });
   }
   next();
 };
 
-// Routes
-app.use('/containers', requireAuth, requireUnsealed, containerRoutes);
-app.use('/info', requireAuth, infoRoutes);
-app.use('/events', requireAuth, eventRoutes);
-app.use('/nodes', requireAuth, nodeRoutes);
-app.use('/secrets', requireAuth, requireUnsealed, secretRoutes);
-app.use('/tasks', requireAuth, requireUnsealed, taskRoutes);
-app.use('/settings', requireAuth, settingsRoutes);
-app.use('/groups', requireAuth, groupRoutes);
+app.use('/api/containers', requireAuth, requireUnsealed, containerRoutes);
+app.use('/api/info', requireAuth, infoRoutes);
+app.use('/api/events', requireAuth, eventRoutes);
+app.use('/api/nodes', requireAuth, nodeRoutes);
+app.use('/api/secrets', requireAuth, requireUnsealed, secretRoutes);
+app.use('/api/tasks', requireAuth, requireUnsealed, taskRoutes);
+app.use('/api/settings', requireAuth, requireUnsealed, settingsRoutes);
+app.use('/api/groups', requireAuth, requireUnsealed, groupRoutes);
 
-// Unseal/Setup Routes
-app.get('/system/status', async (req, res) => {
+app.get('/api/system/status', async (req, res) => {
   let authenticated = false;
-  if (req.cookies.token) {
+  if (req.cookies.token && JWT_SECRET) {
     try {
       jwt.verify(req.cookies.token, JWT_SECRET);
       authenticated = true;
@@ -137,9 +170,8 @@ app.get('/system/status', async (req, res) => {
     initialized,
     sealed,
     authenticated,
-    // Only leak node specific details if authenticated or system is not yet initialized
     nodeId: (authenticated || !initialized) ? nodeId : undefined,
-    nodeName: (authenticated || !initialized) ? nodeName : undefined
+    nodeName: (authenticated || !initialized) ? nodeName : undefined,
   });
 });
 
@@ -148,7 +180,7 @@ import multer from 'multer';
 async function performPostRestoreMigration() {
   const { getContainers, saveContainer } = await import('./services/db.js');
   const containers = await getContainers();
-  
+
   for (const c of containers) {
     if (c.ha && c.ha_allowed_nodes && c.ha_allowed_nodes.length > 0) {
       c.status = 'error: missing-pinned-node';
@@ -161,128 +193,128 @@ async function performPostRestoreMigration() {
 
 async function restoreSystem(snapshotPath, password) {
   console.log('Restoring from snapshot:', snapshotPath);
-  await initializeSystem(password); // mock for now
+  const fs = await import('fs');
+  const snapshotData = fs.readFileSync(snapshotPath);
+  const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
+  const destPath = `${backupPath}/etcd-snapshot-restore.db`;
+  fs.writeFileSync(destPath, snapshotData);
+  console.log('Snapshot copied to', destPath);
+  await initializeSystem(password);
 }
 
 const upload = multer({ dest: '/tmp/uploads/' });
 
-app.post('/system/setup', upload.single('snapshotFile'), async (req, res) => {
+app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) => {
   try {
     const { mode, password, primaryIp, joinToken } = req.body;
-    
+
+    if (!JWT_SECRET) {
+      JWT_SECRET = await getOrCreateJwtSecret();
+    }
+
     if (mode === 'create' || !mode) {
       await initializeSystem(password);
       await registerLocalNode(nodeId, nodeName, nodeIp);
       await bootCluster(nodeId);
     } else if (mode === 'join') {
-      // call primary node to join
-      const joinRes = await fetch(`http://${primaryIp}:8000/system/join`, {
+      const joinRes = await fetch(`http://${primaryIp}:${process.env.PORT || 3000}/api/system/join`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${joinToken}`
+          'Authorization': `Bearer ${joinToken}`,
         },
-        body: JSON.stringify({ name: nodeName, ip: nodeIp })
+        body: JSON.stringify({ name: nodeName, ip: nodeIp }),
       });
       if (!joinRes.ok) {
         throw new Error('Failed to join cluster: ' + await joinRes.text());
       }
-      
+
       const joinData = await joinRes.json();
-      
-      // We would then need to start our own ETCD connecting to the primary
-      // Then boot cluster.
-      // await registerLocalNode(nodeId, nodeName, nodeIp);
-      // await bootCluster(nodeId);
-      
+
       return res.json({ success: true, joined: true, data: joinData });
     } else if (mode === 'restore') {
       const snapshotFile = req.file;
       if (!snapshotFile) throw new Error('Missing snapshot file');
-      
-      // 1. Verify password against the snapshot
-      // 2. Execute restore with --force-new-cluster
-      // 3. Overwrite the ETCD named volume
-      // 4. Reboot the cluster
-      
+
       await restoreSystem(snapshotFile.path, password);
       await registerLocalNode(nodeId, nodeName, nodeIp);
       await bootCluster(nodeId);
-      
-      // Post-restore migration
+
       await performPostRestoreMigration();
     }
 
     const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
     res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
-    
+
     res.json({ success: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message, code: 'SETUP_FAILED' });
   }
 });
 
-app.post('/system/join', async (req, res) => {
-  // This is called by a new node on the primary node
+app.post('/api/system/join', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Missing or invalid join token' });
+      return res.status(401).json({ error: 'Missing or invalid join token', code: 'AUTH_REQUIRED' });
     }
 
     const { name, ip } = req.body;
 
-    // Add member to ETCD
     const etcdRes = await addEtcdMember(name, ip);
 
-    // Save to DB
     const id = uuidv4();
     await saveNode(id, name, ip, 'online');
 
     res.json({ success: true, etcdRes, id });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message, code: 'JOIN_FAILED' });
   }
 });
 
-app.post('/system/unseal', async (req, res) => {
+app.post('/api/system/unseal', async (req, res) => {
   try {
     const { password } = req.body;
+
+    if (!JWT_SECRET) {
+      JWT_SECRET = await getOrCreateJwtSecret();
+    }
+
     await unsealNode(password);
     await registerLocalNode(nodeId, nodeName, nodeIp);
     await bootCluster(nodeId);
 
     const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
     res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
-    
+
     res.json({ success: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message, code: 'UNSEAL_FAILED' });
   }
 });
 
-app.post('/system/logout', (req, res) => {
+app.post('/api/system/logout', (req, res) => {
   res.clearCookie('token');
   res.json({ success: true });
 });
 
-app.post('/system/change-password', requireAuth, requireUnsealed, async (req, res) => {
+app.post('/api/system/change-password', requireAuth, requireUnsealed, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     await changeMasterPassword(currentPassword, newPassword);
     res.json({ success: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message, code: 'PASSWORD_CHANGE_FAILED' });
   }
 });
 
-app.post('/system/rotate-dek', requireAuth, requireUnsealed, async (req, res) => {
+app.post('/api/system/rotate-dek', requireAuth, requireUnsealed, async (req, res) => {
   try {
     const { masterPassword } = req.body;
     await rotateDEK(masterPassword);
     res.json({ success: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message, code: 'DEK_ROTATE_FAILED' });
   }
 });
 
@@ -318,40 +350,34 @@ const stopSystemContainers = async () => {
   }
 };
 
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
+const shutdown = async (signal) => {
+  console.log(`${signal} received. Shutting down gracefully...`);
   stopScheduler();
   stopOrchestrator();
-  closeEtcd();
   await stopSystemContainers();
+  closeEtcd();
   process.exit(0);
-});
+};
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received. Shutting down gracefully...');
-  stopScheduler();
-  stopOrchestrator();
-  closeEtcd();
-  await stopSystemContainers();
-  process.exit(0);
-});
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 const startBackend = async () => {
   try {
+    JWT_SECRET = await getOrCreateJwtSecret();
+
     const etcdStarted = await bootstrapEtcd();
     if (!etcdStarted) {
       console.log('[Cluster] Failed to bootstrap ETCD.');
       return;
     }
-    
-    // Wait for ETCD to become reachable
+
     console.log('[Cluster] Waiting for ETCD to become reachable...');
     await waitForEtcd();
     await registerLocalNode(nodeId, nodeName, nodeIp);
-    
-    // Boot Nginx early so unseal UI is available securely over HTTPS
+
     await bootstrapNginx();
-    
+
     if (!isNodeSealed()) {
       await bootCluster(nodeId);
     } else {

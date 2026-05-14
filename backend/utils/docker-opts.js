@@ -1,7 +1,18 @@
 import { getLocalNodeConfig } from '../services/db.js';
 import { getSecret } from '../services/secrets.js';
 
+const VALID_RESTART_POLICIES = ['no', 'always', 'unless-stopped', 'on-failure'];
+const IMAGE_NAME_RE = /^[a-zA-Z0-9._\-\/]+(:[a-zA-Z0-9._-]+)?$/;
+
 export const buildCreateOpts = async (name, image, env, volumes, ports, restartPolicy, resources, opts = {}) => {
+  if (!IMAGE_NAME_RE.test(image)) {
+    throw new Error(`Invalid image name: ${image}`);
+  }
+
+  if (!VALID_RESTART_POLICIES.includes(restartPolicy)) {
+    throw new Error(`Invalid restart policy: ${restartPolicy}`);
+  }
+
   const PortBindings = {};
   const ExposedPorts = {};
   (ports || []).forEach(p => {
@@ -10,7 +21,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
     if (!PortBindings[cPort]) PortBindings[cPort] = [];
     PortBindings[cPort].push({
       HostIp: p.ip || '',
-      HostPort: p.host ? p.host.toString() : ''
+      HostPort: p.host ? p.host.toString() : '',
     });
   });
   await getLocalNodeConfig();
@@ -30,7 +41,6 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
   const processedEnv = [];
   for (const e of (env || [])) {
     let val = e.value;
-    // Check if it's a secret reference
     const secretMatch = typeof val === 'string' ? val.match(/^\{\{SECRET:(.+)}}$/) : null;
     if (secretMatch) {
       const secretKey = secretMatch[1];
@@ -57,7 +67,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
       NanoCPUs: resources?.cpu ? resources.cpu * 1000000000 : 0,
       NetworkMode: 'web-proxy',
       Privileged: opts.privileged || false,
-    }
+    },
   };
 
   if (opts.stopGracePeriod) {
@@ -86,10 +96,11 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
     createOpts.HostConfig.Devices = opts.devices.split(',').map(d => {
       const [pathOnHost, pathInContainer, cgroupPermissions] = d.trim().split(':');
       if (!pathOnHost) return null;
+      if (!pathOnHost.startsWith('/')) return null;
       return {
         PathOnHost: pathOnHost,
         PathInContainer: pathInContainer || pathOnHost,
-        CgroupPermissions: cgroupPermissions || 'rwm'
+        CgroupPermissions: cgroupPermissions || 'rwm',
       };
     }).filter(Boolean);
   }

@@ -9,20 +9,20 @@ router.get('/', async (req, res) => {
     const groups = await getGroups();
     res.json(groups);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'GROUPS_LIST_FAILED' });
   }
 });
 
 router.post('/', async (req, res) => {
   try {
     const { name, config = { highAvailability: false, targetNodes: [] } } = req.body;
-    if (!name) return res.status(400).json({ error: 'Group name is required' });
-    
+    if (!name) return res.status(400).json({ error: 'Group name is required', code: 'VALIDATION_ERROR' });
+
     const id = uuidv4();
     await saveGroup(id, name, config);
     res.status(201).json({ id, name, config });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'GROUP_CREATE_FAILED' });
   }
 });
 
@@ -32,7 +32,7 @@ router.put('/:id', async (req, res) => {
     await saveGroup(req.params.id, name, config);
     res.json({ id: req.params.id, name, config });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'GROUP_UPDATE_FAILED' });
   }
 });
 
@@ -41,7 +41,7 @@ router.delete('/:id', async (req, res) => {
     await deleteGroup(req.params.id);
     res.status(204).end();
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'GROUP_DELETE_FAILED' });
   }
 });
 

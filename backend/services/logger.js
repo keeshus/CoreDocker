@@ -1,99 +1,91 @@
-import { runEphemeralTask } from './ephemeral-tasks.js';
+import pino from 'pino';
 import etcd from './db.js';
+import fs from 'fs';
+import fsp from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-let logBuffer = [];
-let flushInterval = null;
-
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_RETENTION_KEY = 'settings/log_retention_days';
 const DEFAULT_RETENTION_DAYS = 7;
+const BACKUP_MOUNT = '/mnt/backup';
 
-/**
- * Log a generic system event.
- */
+const getLogDir = () => {
+  const base = process.env.HOST_BACKUP_PATH
+    ? (process.env.HOST_BACKUP_PATH.startsWith('/') ? process.env.HOST_BACKUP_PATH : BACKUP_MOUNT)
+    : BACKUP_MOUNT;
+  return path.join(base, 'logs');
+};
+
+const logDir = getLogDir();
+fs.mkdirSync(logDir, { recursive: true });
+
+const logStream = fs.createWriteStream(path.join(logDir, 'system.ndjson'), { flags: 'a' });
+
+const pinoLogger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  formatters: {
+    level: (label) => ({ level: label }),
+  },
+  redact: {
+    paths: ['password', 'masterPassword', 'currentPassword', 'newPassword', 'token', 'secret', 'sslKey', 'sslCert', 'joinToken'],
+    censor: '[REDACTED]',
+  },
+}, logStream);
+
 export function logEvent(source, type, message, metadata = {}) {
-    const logEntry = {
-        timestamp: new Date().toISOString(),
-        source, // e.g. 'orchestrator', 'scheduler', 'auth'
-        type,   // e.g. 'info', 'error', 'audit'
-        message,
-        metadata
-    };
-    
-    // For immediate visibility, also log to console
-    console.log(`[${source}] [${type}] ${message}`, JSON.stringify(metadata));
-    
-    logBuffer.push(logEntry);
+  if (type === 'error') {
+    pinoLogger.error({ source, ...metadata }, message);
+  } else if (type === 'warn') {
+    pinoLogger.warn({ source, ...metadata }, message);
+  } else {
+    pinoLogger.info({ source, ...metadata }, message);
+  }
 }
 
-/**
- * Flush cached logs to the backupPath.
- */
-export async function flushLogs() {
-    if (logBuffer.length === 0) return;
-
-    const logsToFlush = [...logBuffer];
-    logBuffer = [];
-
-    const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
-    const logFilePath = `${backupPath}/system-logs.jsonl`;
-    
-    const logsString = logsToFlush.map(l => JSON.stringify(l)).join('\n') + '\n';
-    const base64Logs = Buffer.from(logsString).toString('base64');
-
-    try {
-        await runEphemeralTask('alpine', [
-            'sh', '-c', 
-            `mkdir -p "${backupPath}" && echo "${base64Logs}" | base64 -d >> "${logFilePath}"`
-        ]);
-        console.log(`[Logger] Successfully flushed ${logsToFlush.length} log entries to disk.`);
-    } catch (e) {
-        console.error(`[Logger] Failed to flush logs: ${e.message}`);
-        // Put back in buffer for next attempt
-        logBuffer = [...logsToFlush, ...logBuffer];
-    }
-}
-
-/**
- * Start the periodic flush cycle (every 5 minutes).
- */
 export function startLogger() {
-    if (flushInterval) return;
-    flushInterval = setInterval(flushLogs, 5 * 60 * 1000);
+  pinoLogger.info('Logger started');
 }
 
-/**
- * Stop the periodic flush and perform one final flush.
- */
 export async function stopLogger() {
-    if (flushInterval) {
-        clearInterval(flushInterval);
-        flushInterval = null;
-    }
-    console.log('[Logger] Performing final shutdown flush...');
-    await flushLogs();
+  pinoLogger.info('Logger stopped');
+  await pinoLogger.flush();
 }
 
-/**
- * Purge logs older than the configured retention period.
- * (Cluster-wide job)
- */
+export async function flushLogs() {
+  const logFilePath = path.join(logDir, 'system.ndjson');
+  pinoLogger.info({ path: logFilePath }, 'Logs flushed to disk');
+  await pinoLogger.flush();
+}
+
 export async function purgeOldLogs() {
-    const retentionDays = await etcd.get(LOG_RETENTION_KEY) || DEFAULT_RETENTION_DAYS;
-    // This is more complex than a simple 'rm', we need to filter the JSONL.
-    // However, for now, we'll implement a simple bash-based logic that could work 
-    // or we can just implement the removal of the whole file if it gets too old.
-    // For now let's just use a simple placeholder command.
-    console.log(`[Logger] Purging logs older than ${retentionDays} days...`);
-    
-    // Actually, we should probably read, filter and write back. 
-    // But since it's an ephemeral task, it's easier to just use 'find' or something if it's multiple files.
-    // Let's assume for now we keep it simple.
-}
+  const retentionDaysRaw = await etcd.get(LOG_RETENTION_KEY).string();
+  const retentionDays = retentionDaysRaw ? parseInt(retentionDaysRaw, 10) : DEFAULT_RETENTION_DAYS;
 
-// Hook into process signals for final flush
-process.on('SIGTERM', async () => {
-    await stopLogger();
-});
-process.on('SIGINT', async () => {
-    await stopLogger();
-});
+  pinoLogger.info({ retentionDays, logDir }, 'Purging old logs');
+
+  try {
+    const files = await fsp.readdir(logDir);
+    const now = Date.now();
+    const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
+
+    let purged = 0;
+    for (const file of files) {
+      if (!file.endsWith('.ndjson') && !file.endsWith('.jsonl')) continue;
+      const filePath = path.join(logDir, file);
+      try {
+        const stat = await fsp.stat(filePath);
+        if (stat.mtimeMs < cutoff) {
+          await fsp.unlink(filePath);
+          purged++;
+          pinoLogger.info({ file }, 'Purged old log file');
+        }
+      } catch (e) {
+        pinoLogger.warn({ err: e.message, file }, 'Could not purge log file');
+      }
+    }
+    pinoLogger.info({ purged }, 'Log purge complete');
+  } catch (e) {
+    pinoLogger.warn({ err: e.message }, 'Log purge directory not found or inaccessible');
+  }
+}

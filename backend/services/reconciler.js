@@ -56,6 +56,7 @@ const reconcileDNSVIP = async (localNodeId) => {
     }
 
     const priority = 100 - (nodeIndex * 10);
+    const keepalivedPass = process.env.KEEPALIVED_PASSWORD || 'c0r3d0ck3r';
     const config = `
 vrrp_instance VI_DNS {
     state ${nodeIndex === 0 ? 'MASTER' : 'BACKUP'}
@@ -65,7 +66,7 @@ vrrp_instance VI_DNS {
     advert_int 1
     authentication {
         auth_type PASS
-        auth_pass 2222
+        auth_pass ${keepalivedPass}
     }
     virtual_ipaddress {
         ${settings.dnsVip}

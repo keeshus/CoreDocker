@@ -64,7 +64,7 @@ router.get('/', async (req, res) => {
           for (const node of nodes) {
             if (node.id === (process.env.NODE_ID || 'master')) continue;
             const token = generateClusterToken({ node: process.env.NODE_ID });
-            const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/events`, {
+            const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/api/events`, {
               headers: { 'Authorization': `Bearer ${token}` }
             });
             if (resp.body) {

@@ -11,11 +11,11 @@ router.get('/', async (req, res) => {
       sharedIpPool: '',
       backhaulNetwork: '',
       clusterDomain: '',
-      clusterVip: ''
+      clusterVip: '',
     };
     res.json(settings);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'SETTINGS_GET_FAILED' });
   }
 });
 
@@ -25,7 +25,7 @@ router.post('/', async (req, res) => {
     await etcd.put(SETTINGS_KEY).value(JSON.stringify(settings));
     res.json(settings);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, code: 'SETTINGS_SAVE_FAILED' });
   }
 });
 
