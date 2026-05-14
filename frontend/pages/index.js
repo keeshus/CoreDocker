@@ -78,10 +78,27 @@ export default function Home() {
   const handleUnseal = async (payload) => {
     const endpoint = status.initialized ? '/api/system/unseal' : '/api/system/setup';
     try {
+      let body;
+      let headers = {};
+      if (payload instanceof HTMLFormElement || payload?.snapshotFile) {
+        const formData = new FormData();
+        if (payload.mode) formData.append('mode', payload.mode);
+        if (payload.password) formData.append('password', payload.password);
+        if (payload.primaryIp) formData.append('primaryIp', payload.primaryIp);
+        if (payload.joinToken) formData.append('joinToken', payload.joinToken);
+        if (payload.snapshotFile) formData.append('snapshotFile', payload.snapshotFile);
+        body = formData;
+      } else if (typeof payload === 'string') {
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify({ password: payload });
+      } else {
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify(payload);
+      }
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(typeof payload === 'string' ? { password: payload } : payload)
+        headers,
+        body
       });
       if (res.ok) {
         refreshData();
@@ -247,7 +264,6 @@ export default function Home() {
         </>
       )}
       
-      {activeTab === 'nodes' && <NodesTab />}
       {activeTab === 'secrets' && <SecretsTab />}
       {activeTab === 'tasks' && <TasksTab />}
       {activeTab === 'cluster-settings' && <ClusterSettings />}

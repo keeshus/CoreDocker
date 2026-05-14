@@ -10,6 +10,7 @@ router.get('/', async (req, res) => {
     const settings = data ? JSON.parse(data) : {
       sharedIpPool: '',
       backhaulNetwork: '',
+      dnsVip: '',
       clusterDomain: '',
       clusterVip: '',
     };

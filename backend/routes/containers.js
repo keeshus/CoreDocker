@@ -108,7 +108,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: validationErrors.join('; '), code: 'VALIDATION_ERROR' });
     }
 
-    if (!resources || !resources.memoryLimit || !resources.cpuLimit) {
+    if (!resources || !resources.memory || !resources.cpu) {
       return res.status(400).json({ error: 'Memory and CPU limits are mandatory.', code: 'VALIDATION_ERROR' });
     }
 
@@ -195,7 +195,7 @@ router.put('/:id', async (req, res) => {
     await container.remove();
     await removeRoute(oldName);
 
-    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group, ha, tmpfs, stopGracePeriod, shmSize, devices, privileged };
+    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group, ha, ha_allowed_nodes: req.body.ha_allowed_nodes || [], tmpfs, stopGracePeriod, shmSize, devices, privileged };
     const dbContainer = await getContainerByName(oldName);
     let dbId = dbContainer ? dbContainer.id : uuidv4();
 
