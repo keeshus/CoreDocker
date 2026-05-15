@@ -179,6 +179,7 @@ app.get('/api/system/status', async (req, res) => {
 });
 
 import multer from 'multer';
+import { SYSTEM_NAMESPACE } from './services/ephemeral-tasks.js';
 
 async function performPostRestoreMigration() {
   console.log('[Restore] Running pending migrations...');
@@ -190,7 +191,7 @@ async function restoreSystem(snapshotPath, password) {
   const fs = await import('fs');
   const snapshotData = fs.readFileSync(snapshotPath);
   const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
-  const destPath = `${backupPath}/etcd-snapshot-restore.db`;
+  const destPath = `${backupPath}/${SYSTEM_NAMESPACE}/etcd-snapshot-restore.db`;
   fs.writeFileSync(destPath, snapshotData);
   console.log('Snapshot copied to', destPath);
   await initializeSystem(password);

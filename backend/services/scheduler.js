@@ -1,5 +1,5 @@
 import etcd from './db.js';
-import { runEphemeralTask } from './ephemeral-tasks.js';
+import { runEphemeralTask, SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
 import { logEvent, purgeOldLogs } from './logger.js';
 
 const TASKS_PREFIX = 'tasks/';
@@ -142,7 +142,7 @@ export const runTask = async (taskId) => {
       } else if (taskId === 'etcd-snapshot') {
         const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
         const snapshotName = `etcd-snapshot-${new Date().toISOString().replace(/:/g, '-')}.db`;
-        const destPath = `${backupPath}/${snapshotName}`;
+        const destPath = `${backupPath}/${SYSTEM_NAMESPACE}/${snapshotName}`;
         
         const docker = (await import('./docker.js')).default;
         const etcdContainer = docker.getContainer('core-docker-etcd');

@@ -4,6 +4,7 @@ import path from 'path';
 
 const BACKUP_MOUNT = '/mnt/backup';
 const NONBACKUP_MOUNT = '/mnt/non-backup';
+export const SYSTEM_NAMESPACE = '__system__';
 
 const SAFE_PATH_RE = /^[a-zA-Z0-9_\/\-.]+$/;
 
