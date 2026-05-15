@@ -4,6 +4,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    user: nodejs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${CERTS_LOCATION:-./nginx/ssl}:/etc/certs:ro
@@ -38,6 +39,7 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    user: nodejs
     depends_on:
       - backend
     networks:

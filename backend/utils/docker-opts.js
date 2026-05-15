@@ -57,6 +57,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
   const createOpts = {
     Image: image,
     name: name,
+    User: opts.privileged ? '0:0' : '1000:1000',
     Env: processedEnv,
     ExposedPorts,
     HostConfig: {
