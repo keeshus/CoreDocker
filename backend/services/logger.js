@@ -4,6 +4,7 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_RETENTION_KEY = 'settings/log_retention_days';
@@ -11,10 +12,7 @@ const DEFAULT_RETENTION_DAYS = 7;
 const BACKUP_MOUNT = '/mnt/backup';
 
 const getLogDir = () => {
-  const base = process.env.HOST_BACKUP_PATH
-    ? (process.env.HOST_BACKUP_PATH.startsWith('/') ? process.env.HOST_BACKUP_PATH : BACKUP_MOUNT)
-    : BACKUP_MOUNT;
-  return path.join(base, 'logs');
+  return path.join(BACKUP_MOUNT, SYSTEM_NAMESPACE, 'logs');
 };
 
 const logDir = getLogDir();

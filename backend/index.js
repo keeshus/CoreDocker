@@ -359,8 +359,6 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 const startBackend = async () => {
   try {
-    JWT_SECRET = await getOrCreateJwtSecret();
-
     const etcdStarted = await bootstrapEtcd();
     if (!etcdStarted) {
       console.log('[Cluster] Failed to bootstrap ETCD.');
@@ -369,6 +367,9 @@ const startBackend = async () => {
 
     console.log('[Cluster] Waiting for ETCD to become reachable...');
     await waitForEtcd();
+
+    JWT_SECRET = await getOrCreateJwtSecret();
+
     await registerLocalNode(nodeId, nodeName, nodeIp);
 
     await bootstrapNginx();

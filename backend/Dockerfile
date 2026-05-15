@@ -35,8 +35,10 @@ COPY --link --from=builder --chown=nodejs:nodejs /app/package.json ./package.jso
 # Create data directory and set permissions
 RUN mkdir -p /app/data && chown nodejs:nodejs /app/data
 
-# Use the non-root user
-USER nodejs
+# Entrypoint creates mount subdirectories, then runs the app as root
+# (root inside container maps to host user in rootless Docker)
+COPY backend/entrypoint.sh /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 EXPOSE 3000
 

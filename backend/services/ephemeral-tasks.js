@@ -92,9 +92,7 @@ export async function writeFileToHost(filePath, content) {
   const relativePath = filePath.startsWith('/') ? filePath.replace(/^\//, '') : filePath;
   validatePath(relativePath);
 
-  const mountPath = process.env.HOST_BACKUP_PATH
-    ? (process.env.HOST_BACKUP_PATH.startsWith('/') ? process.env.HOST_BACKUP_PATH : BACKUP_MOUNT)
-    : BACKUP_MOUNT;
+  const mountPath = BACKUP_MOUNT;
   const fullPath = path.join(mountPath, relativePath);
 
   await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -105,9 +103,7 @@ export async function removeFileFromHost(filePath) {
   const relativePath = filePath.startsWith('/') ? filePath.replace(/^\//, '') : filePath;
   validatePath(relativePath);
 
-  const mountPath = process.env.HOST_BACKUP_PATH
-    ? (process.env.HOST_BACKUP_PATH.startsWith('/') ? process.env.HOST_BACKUP_PATH : BACKUP_MOUNT)
-    : BACKUP_MOUNT;
+  const mountPath = BACKUP_MOUNT;
   const fullPath = path.join(mountPath, relativePath);
 
   try {

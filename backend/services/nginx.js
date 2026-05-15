@@ -1,11 +1,11 @@
 import docker from './docker.js';
 import { getLocalNodeConfig } from './db.js';
-import { runEphemeralTask, writeFileToHost, removeFileFromHost } from './ephemeral-tasks.js';
+import { runEphemeralTask, writeFileToHost, removeFileFromHost, SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
 import { logEvent } from './logger.js';
 
-const NGINX_CONF_DIR = 'nginx/conf.d';
-const NGINX_LOCATIONS_DIR = 'nginx/conf.d/locations';
-const NGINX_SSL_DIR = 'nginx/ssl';
+const NGINX_CONF_DIR = `${SYSTEM_NAMESPACE}/nginx/conf.d`;
+const NGINX_LOCATIONS_DIR = `${SYSTEM_NAMESPACE}/nginx/conf.d/locations`;
+const NGINX_SSL_DIR = `${SYSTEM_NAMESPACE}/nginx/ssl`;
 
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
     // Validation
@@ -122,14 +122,16 @@ export async function bootstrapNginx() {
     const CONTAINER_NAME = 'core-docker-proxy';
     const NGINX_IMAGE = process.env.NGINX_IMAGE || 'nginx:latest';
     
+    // Remove stale container if it exists (from a previous failed bootstrap)
     try {
         const container = docker.getContainer(CONTAINER_NAME);
         const info = await container.inspect();
-        if (!info.State.Running) {
-            await container.start();
+        if (info.State.Running) {
+            console.log('[NGINX] Container is already running.');
+            return;
         }
-        console.log('[NGINX] Container is already running.');
-        return;
+        console.log('[NGINX] Removing stale container...');
+        await container.remove({ force: true });
     } catch (e) {
         if (e.statusCode !== 404) throw e;
     }
@@ -157,15 +159,15 @@ export async function bootstrapNginx() {
     }).then(res => res.exitCode === 0).catch(() => false);
 
     const binds = [
-        `${backupPath}/nginx/conf.d:/etc/nginx/conf.d`,
-        `${backupPath}/nginx/ssl:/etc/nginx/ssl`
+        `${backupPath}/${SYSTEM_NAMESPACE}/nginx/conf.d:/etc/nginx/conf.d`,
+        `${backupPath}/${SYSTEM_NAMESPACE}/nginx/ssl:/etc/nginx/ssl`
     ];
 
     if (certsExist) {
         binds.push(`${hostCertPath}:/etc/nginx/ssl/host:ro`);
     } else {
         logEvent('nginx', 'warn', `No host certificates found at ${hostCertPath}, generating self-signed...`);
-        const selfSignedPath = `${backupPath}/nginx/ssl/host`;
+        const selfSignedPath = `${backupPath}/${SYSTEM_NAMESPACE}/nginx/ssl/host`;
         await runEphemeralTask('alpine', [
             'sh', '-c',
             `apk add --no-cache openssl && \
@@ -183,7 +185,35 @@ export async function bootstrapNginx() {
     const networkName = targetNetwork ? targetNetwork.Name : 'backhaul';
 
     const webProxyNetwork = networks.find(n => n.Name === 'web-proxy' || n.Name.endsWith('_web-proxy'));
-    const webProxyName = webProxyNetwork ? webProxyNetwork.Name : 'web-proxy';
+    if (!webProxyNetwork) {
+        console.log('[NGINX] Creating web-proxy network...');
+        await docker.createNetwork({ Name: 'web-proxy', CheckDuplicate: true });
+    }
+    const webProxyName = 'web-proxy';
+
+    // Write default nginx config that proxies / to the frontend
+    // and includes dynamically added location blocks.
+    // Uses resolver + variable to defer DNS resolution to runtime,
+    // so nginx starts even if the frontend container isn't resolvable yet.
+    const defaultConfContent = `
+server {
+    listen 80;
+
+    resolver 127.0.0.11 valid=30s;
+
+    include /etc/nginx/conf.d/locations/*.conf;
+
+    set $frontend_upstream http://core-docker-frontend:3000;
+    location / {
+        proxy_pass $frontend_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+`;
+    await writeFileToHost(`${NGINX_CONF_DIR}/default.conf`, defaultConfContent.trimStart());
 
     await docker.createContainer({
         Image: NGINX_IMAGE,

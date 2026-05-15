@@ -4,7 +4,6 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    user: nodejs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${CERTS_LOCATION:-./nginx/ssl}:/etc/certs:ro
@@ -17,8 +16,8 @@ services:
       - DNS_PRODUCTION=true
       - NODE_DOMAIN=${NODE_DOMAIN:-node-1.local}
       - NODE_IP=${NODE_IP:-127.0.0.1}
-      - HOST_BACKUP_PATH=${BACKUP_LOCATION:-./data/backup}
-      - HOST_NONBACKUP_PATH=${NONBACKUP_LOCATION:-./data/nonbackup}
+      - HOST_BACKUP_PATH=${HOST_BACKUP_PATH:-${PWD}/data/backup}
+      - HOST_NONBACKUP_PATH=${HOST_NONBACKUP_PATH:-${PWD}/data/nonbackup}
     group_add:
       - 986 # Host docker group GID
     networks:

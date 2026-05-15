@@ -1,4 +1,5 @@
 import docker from './docker.js';
+import { SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
 
 const ETCD_IMAGE = process.env.ETCD_IMAGE || 'gcr.io/etcd-development/etcd:v3.6.8';
 const CONTAINER_NAME = 'core-docker-etcd';
@@ -43,9 +44,9 @@ export const bootstrapEtcd = async () => {
 
       let backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
       
-      console.log(`[ETCD] Using host bind mount: ${backupPath}/etcd-data`);
+      console.log(`[ETCD] Using host bind mount: ${backupPath}/${SYSTEM_NAMESPACE}/etcd-data`);
 
-      const etcdConfigPath = `${backupPath}/etcd/config`;
+      const etcdConfigPath = `${backupPath}/${SYSTEM_NAMESPACE}/etcd/config`;
 
       const createOpts = {
         Image: ETCD_IMAGE,
@@ -69,7 +70,7 @@ export const bootstrapEtcd = async () => {
           User: '0:0',
           RestartPolicy: { Name: 'always' },
           Binds: [
-            `${backupPath}/etcd-data:/etcd-data`,
+            `${backupPath}/${SYSTEM_NAMESPACE}/etcd-data:/etcd-data`,
             `${etcdConfigPath}:/etc/etcd:ro`
           ]
         },
