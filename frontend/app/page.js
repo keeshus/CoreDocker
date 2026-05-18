@@ -11,8 +11,10 @@ import AppLayout from '../components/AppLayout';
 import UnsealView from '../components/UnsealView';
 import SetupView from '../components/SetupView';
 import CreateContainer from '../components/CreateContainer';
+import { UIProvider, useUI } from '../lib/UIProvider';
 
-export default function Home() {
+function HomeInner() {
+  const { showToast, showConfirm } = useUI();
   const [activeTab, setActiveTab] = useState('containers');
   const [containers, setContainers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -23,6 +25,7 @@ export default function Home() {
   const [events, setEvents] = useState([]);
   const [expandedContainer, setExpandedContainer] = useState(null);
   const [editingContainer, setEditingContainer] = useState(null);
+  const [editingGroup, setEditingGroup] = useState(null);
   const eventScrollRef = useRef(null);
 
   const refreshData = async () => {
@@ -106,10 +109,10 @@ export default function Home() {
         refreshData();
       } else {
         const err = await res.json();
-        alert(err.error);
+        showToast(err.error, 'error');
       }
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, 'error');
     }
   };
 
@@ -124,30 +127,52 @@ export default function Home() {
     try {
       const res = await fetch(`/api/containers/${container.Id}/persist`, { method: 'POST' });
       if (res.ok) {
-        alert('Container successfully migrated to CoreDocker.');
+        showToast('Container migrated to CoreDocker.', 'success');
         refreshData();
       } else {
         const err = await res.json();
-        alert('Failed to migrate: ' + err.error);
+        showToast('Failed to migrate: ' + err.error, 'error');
       }
     } catch (e) {
-      alert('Failed to migrate: ' + e.message);
+      showToast('Failed to migrate: ' + e.message, 'error');
     }
   };
 
   const handleDelete = async (container) => {
-    if (!window.confirm(`Are you sure you want to completely delete ${container.Names[0]}?`)) return;
+    const confirmed = await showConfirm(`Delete container "${container.Names[0]}"? This action cannot be undone.`);
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/containers/${container.Id}`, { method: 'DELETE' });
       if (res.ok) {
-        alert('Container deleted.');
+        showToast('Container deleted.', 'success');
         refreshData();
       } else {
         const err = await res.json();
-        alert('Failed to delete: ' + err.error);
+        showToast('Failed to delete: ' + err.error, 'error');
       }
     } catch (e) {
-      alert('Failed to delete: ' + e.message);
+      showToast('Failed to delete: ' + e.message, 'error');
+    }
+  };
+
+  const handleEditGroup = (group) => {
+    setEditingGroup(group);
+  };
+
+  const handleDeleteGroup = async (group) => {
+    const confirmed = await showConfirm(`Delete group "${group.name}"? Containers in this group will not be removed.`);
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/groups/${group.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Group deleted.', 'success');
+        refreshData();
+      } else {
+        const err = await res.json();
+        showToast('Failed to delete group: ' + err.error, 'error');
+      }
+    } catch (e) {
+      showToast('Failed to delete group: ' + e.message, 'error');
     }
   };
 
@@ -217,7 +242,25 @@ export default function Home() {
               <section key={group.id} style={{ marginBottom: '40px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
                 <div style={{ padding: '15px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ margin: 0, fontSize: '1.2em', color: '#1e293b' }}>{group.name}</h3>
-                  <span style={{ fontSize: '0.85em', color: '#64748b' }}>{groupContainers.length} Container(s)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '0.85em', color: '#64748b' }}>{groupContainers.length} Container(s)</span>
+                    {group.id !== 'ungrouped' && (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleEditGroup(group); }}
+                          style={{ padding: '4px 10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group); }}
+                          style={{ padding: '4px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
@@ -263,6 +306,14 @@ export default function Home() {
               onClose={() => setEditingContainer(null)} 
             />
           )}
+          {editingGroup && (
+            <CreateGroup 
+              isOpenMode={true} 
+              initialData={editingGroup} 
+              onCreated={() => { setEditingGroup(null); refreshData(); }} 
+              onClose={() => setEditingGroup(null)} 
+            />
+          )}
         </>
       )}
       
@@ -271,5 +322,13 @@ export default function Home() {
       {activeTab === 'cluster-settings' && <ClusterSettings />}
       {activeTab === 'node-settings' && <NodeSettings systemContainers={containers.filter(c => c.Names[0].startsWith('/core-docker-'))} stats={stats} />}
     </AppLayout>
+  );
+}
+
+export default function Home() {
+  return (
+    <UIProvider>
+      <HomeInner />
+    </UIProvider>
   );
 }

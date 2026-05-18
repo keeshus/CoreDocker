@@ -61,10 +61,10 @@ async function withLock(taskName, scope, callback) {
   try {
     // Try to acquire lock with 10s TTL
     const lease = etcd.lease(10);
-    const success = await lease.put(lockKey).value(nodeId).ifAbsent();
-    
+    const success = await etcd.put(lockKey).value(nodeId).lease(lease).ifAbsent();
+
     if (!success) {
-      // console.log(`[Scheduler] Lock ${lockKey} already held. Skipping task.`);
+      await lease.revoke();
       return;
     }
 

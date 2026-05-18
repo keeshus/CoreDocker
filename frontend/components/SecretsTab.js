@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Plus, Trash2, Key } from 'lucide-react';
+import { Lock, Plus, Trash2, Key, Pencil } from 'lucide-react';
 
 export default function SecretsTab() {
   const [secrets, setSecrets] = useState([]);
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
   const [loading, setLoading] = useState(true);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editValue, setEditValue] = useState('');
 
   const fetchSecrets = async () => {
     try {
       const res = await fetch('/api/secrets');
-      const data = await res.json();
-      setSecrets(data);
+      if (res.ok) {
+        const data = await res.json();
+        setSecrets(data);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -47,6 +51,29 @@ export default function SecretsTab() {
     try {
       const res = await fetch(`/api/secrets/${key}`, { method: 'DELETE' });
       if (res.ok) fetchSecrets();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleEditSecret = (key) => {
+    setEditingKey(key);
+    setEditValue('');
+  };
+
+  const handleUpdateSecret = async (key) => {
+    if (!editValue) return;
+    try {
+      const res = await fetch(`/api/secrets/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: editValue }),
+      });
+      if (res.ok) {
+        setEditingKey(null);
+        setEditValue('');
+        fetchSecrets();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -108,15 +135,36 @@ export default function SecretsTab() {
             <tr><td colSpan="2" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No secrets found.</td></tr>
           ) : secrets.map(key => (
             <tr key={key} style={{ borderBottom: '1px solid #f1f5f9' }}>
-              <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>{key}</td>
-              <td style={{ padding: '15px 10px', textAlign: 'right' }}>
-                <button
-                  onClick={() => handleDeleteSecret(key)}
-                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}
-                  title="Delete Secret"
-                >
-                  <Trash2 size={18} />
-                </button>
+              <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>
+                {editingKey === key ? (
+                  <input
+                    type="password"
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    placeholder="New value"
+                    style={{ width: '80%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                    autoFocus
+                  />
+                ) : (
+                  key
+                )}
+              </td>
+              <td style={{ padding: '15px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                {editingKey === key ? (
+                  <>
+                    <button onClick={() => handleUpdateSecret(key)} style={{ background: '#10b981', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginRight: '8px' }}>Save</button>
+                    <button onClick={() => setEditingKey(null)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px' }}>Cancel</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => handleEditSecret(key)} style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', marginRight: '12px' }} title="Edit Secret">
+                      <Pencil size={18} />
+                    </button>
+                    <button onClick={() => handleDeleteSecret(key)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }} title="Delete Secret">
+                      <Trash2 size={18} />
+                    </button>
+                  </>
+                )}
               </td>
             </tr>
           ))}

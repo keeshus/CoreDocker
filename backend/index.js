@@ -13,7 +13,7 @@ import secretRoutes from './routes/secrets.js';
 import taskRoutes from './routes/tasks.js';
 import settingsRoutes from './routes/settings.js';
 import groupRoutes from './routes/groups.js';
-import {reconcileContainers} from './services/reconciler.js';
+import {reconcileContainers, startReconciler, stopReconciler} from './services/reconciler.js';
 import {bootstrapEtcd, addEtcdMember} from './services/etcd-cluster.js';
 import {closeEtcd, registerLocalNode, waitForEtcd, saveNode} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
@@ -37,6 +37,10 @@ import {
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Trust the first reverse proxy (nginx) so req.ip returns the real client IP
+// and express-rate-limit correctly identifies individual clients.
+app.set('trust proxy', 1);
 
 let JWT_SECRET = null;
 const nodeId = process.env.NODE_ID || uuidv4();
@@ -99,6 +103,7 @@ const bootCluster = async (nodeId) => {
     await reconcileContainers(nodeId);
     startScheduler();
     startOrchestrator(nodeId);
+    startReconciler(nodeId);
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
     await runMigrations(migrations);
@@ -330,7 +335,9 @@ const stopSystemContainers = async () => {
 
     const networks = await docker.listNetworks();
     for (const n of networks) {
-      if (n.Name === 'backhaul' || n.Name === 'web-proxy' || n.Name.startsWith('group-')) {
+      // Only clean up dynamically-created networks. backhaul is managed
+      // by docker-compose and will be removed when the stack goes down.
+      if (n.Name === 'web-proxy' || n.Name.startsWith('group-')) {
         console.log(`Cleaning up network ${n.Name}...`);
         try {
           const network = docker.getNetwork(n.Id);
@@ -349,6 +356,7 @@ const shutdown = async (signal) => {
   console.log(`${signal} received. Shutting down gracefully...`);
   stopScheduler();
   stopOrchestrator();
+  stopReconciler();
   await stopSystemContainers();
   closeEtcd();
   process.exit(0);

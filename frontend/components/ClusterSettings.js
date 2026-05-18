@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Plus, Trash2 } from 'lucide-react';
 import { validatePasswordChange } from '../lib/domain-logic';
+import { useUI } from '../lib/UIProvider';
 
 export default function ClusterSettings() {
+  const { showToast, showConfirm } = useUI();
   const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '', dnsVip: '', clusterDomain: '', clusterVip: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -56,13 +58,13 @@ export default function ClusterSettings() {
         body: JSON.stringify(settings)
       });
       if (res.ok) {
-        alert('Settings saved successfully!');
+        showToast('Settings saved successfully!', 'success');
       } else {
         const error = await res.json();
-        alert('Error saving settings: ' + JSON.stringify(error));
+        showToast('Error saving settings: ' + JSON.stringify(error), 'error');
       }
     } catch (e) {
-      alert('Error saving settings: ' + e.message);
+      showToast('Error saving settings: ' + e.message, 'error');
     }
     setSaving(false);
   };
@@ -88,7 +90,8 @@ export default function ClusterSettings() {
   };
 
   const handleDeleteNode = async (id) => {
-    if (!window.confirm('Are you sure you want to remove this node?')) return;
+    const confirmed = await showConfirm('Are you sure you want to remove this node?');
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/nodes/${id}`, { method: 'DELETE' });
       if (res.ok) fetchNodes();
@@ -101,7 +104,7 @@ export default function ClusterSettings() {
     e.preventDefault();
     const validation = validatePasswordChange(passwords);
     if (!validation.valid) {
-      alert(validation.error);
+      showToast(validation.error, 'error');
       return;
     }
     setIsChangingPassword(true);
@@ -115,37 +118,44 @@ export default function ClusterSettings() {
         })
       });
       if (res.ok) {
-        alert('Master password updated successfully!');
+        showToast('Master password updated successfully!', 'success');
         setPasswords({ current: '', next: '', confirm: '' });
       } else {
         const error = await res.json();
-        alert('Error: ' + error.error);
+        showToast('Error: ' + error.error, 'error');
       }
     } catch (e) {
-      alert('Error changing password: ' + e.message);
+      showToast('Error changing password: ' + e.message, 'error');
     }
     setIsChangingPassword(false);
   };
 
-  const handleRotateDEK = async () => {
-    const password = prompt("DANGER: This will re-encrypt all cluster data. Enter your Master Password to authorize DEK rotation:");
-    if (!password) return;
+  const [dekPassword, setDekPassword] = useState('');
+  const [showDekPrompt, setShowDekPrompt] = useState(false);
 
+  const handleRotateDEK = async () => {
+    setShowDekPrompt(true);
+  };
+
+  const confirmRotateDEK = async () => {
+    if (!dekPassword) return;
+    setShowDekPrompt(false);
     setIsRotating(true);
     try {
       const res = await fetch('/api/system/rotate-dek', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ masterPassword: password })
+        body: JSON.stringify({ masterPassword: dekPassword })
       });
       if (res.ok) {
-        alert('Data Encryption Key rotated successfully! All data has been re-encrypted.');
+        showToast('Data Encryption Key rotated successfully! All data has been re-encrypted.', 'success');
+        setDekPassword('');
       } else {
         const error = await res.json();
-        alert('Error: ' + error.error);
+        showToast('Error: ' + error.error, 'error');
       }
     } catch (e) {
-      alert('Error rotating DEK: ' + e.message);
+      showToast('Error rotating DEK: ' + e.message, 'error');
     }
     setIsRotating(false);
   };
@@ -412,6 +422,47 @@ export default function ClusterSettings() {
           </div>
         </div>
       </div>
+
+      {showDekPrompt && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', zIndex: 2000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white', padding: '24px', borderRadius: '8px',
+            maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+          }}>
+            <h4 style={{ margin: '0 0 10px 0', color: '#dc2626' }}>Rotate Data Encryption Key</h4>
+            <p style={{ fontSize: '0.9em', color: '#64748b', marginBottom: '15px' }}>
+              This will re-encrypt all cluster data. Enter your Master Password to authorize.
+            </p>
+            <input
+              type="password"
+              value={dekPassword}
+              onChange={e => setDekPassword(e.target.value)}
+              placeholder="Master Password"
+              style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', marginBottom: '15px', boxSizing: 'border-box' }}
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setShowDekPrompt(false); setDekPassword(''); }}
+                style={{ padding: '8px 20px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRotateDEK}
+                disabled={!dekPassword}
+                style={{ padding: '8px 20px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Rotate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

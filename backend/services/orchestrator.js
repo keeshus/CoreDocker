@@ -35,11 +35,11 @@ export const runOrchestrationLoop = async () => {
             const countA = containers.filter(c => c.current_node === a.id);
             const countB = containers.filter(c => c.current_node === b.id);
             
-            const memA = countA.reduce((sum, c) => sum + (c.config?.resources?.memoryLimit || 512 * 1024 * 1024), 0);
-            const memB = countB.reduce((sum, c) => sum + (c.config?.resources?.memoryLimit || 512 * 1024 * 1024), 0);
-            
-            const cpuA = countA.reduce((sum, c) => sum + (c.config?.resources?.cpuLimit || 1), 0);
-            const cpuB = countB.reduce((sum, c) => sum + (c.config?.resources?.cpuLimit || 1), 0);
+            const memA = countA.reduce((sum, c) => sum + ((c.config?.resources?.memory || 512) * 1024 * 1024), 0);
+            const memB = countB.reduce((sum, c) => sum + ((c.config?.resources?.memory || 512) * 1024 * 1024), 0);
+
+            const cpuA = countA.reduce((sum, c) => sum + (c.config?.resources?.cpu || 1), 0);
+            const cpuB = countB.reduce((sum, c) => sum + (c.config?.resources?.cpu || 1), 0);
             
             const freeMemA = (a.system?.totalMem || Number.MAX_SAFE_INTEGER) - memA;
             const freeMemB = (b.system?.totalMem || Number.MAX_SAFE_INTEGER) - memB;

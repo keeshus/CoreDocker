@@ -148,9 +148,7 @@ router.post('/', async (req, res) => {
     const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
     const container = await docker.createContainer(createOpts);
 
-    await saveContainer(containerId, name, config, 'running', container.id);
-
-    await container.start();
+    await saveContainer(containerId, name, config, 'running', container.id, nodeId);
     await ensureNetworkConnections(group, container.id);
 
     if (proxy.enabled && proxy.uri && proxy.port) {
@@ -182,6 +180,8 @@ router.put('/:id', async (req, res) => {
     const proxied = await proxyToNode(dbC?.current_node, req, res);
     if (proxied !== false) return;
 
+    const existingNode = process.env.NODE_ID || 'master';
+
     let container = docker.getContainer(id);
     let inspect;
     try {
@@ -212,7 +212,7 @@ router.put('/:id', async (req, res) => {
       }
     }
 
-    await saveContainer(dbId, name, config, 'running');
+    await saveContainer(dbId, name, config, 'running', null, existingNode);
 
     try {
       await docker.getImage(image).inspect();
@@ -228,7 +228,7 @@ router.put('/:id', async (req, res) => {
     const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
     container = await docker.createContainer(createOpts);
 
-    await saveContainer(dbId, name, config, 'running', container.id);
+    await saveContainer(dbId, name, config, 'running', container.id, existingNode);
 
     await container.start();
     await ensureNetworkConnections(group, container.id);

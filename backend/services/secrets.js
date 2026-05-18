@@ -175,10 +175,10 @@ export const rotateDEK = async (masterPassword) => {
     throw new Error('Invalid master password');
   }
 
-  const secrets = await etcd.get(SECRETS_PREFIX, { isPrefix: true }).all();
-  const decryptedSecrets = secrets.map(s => ({
-    key: s.key,
-    value: decrypt(s.value)
+  const secrets = await etcd.getAll().prefix(SECRETS_PREFIX).strings();
+  const decryptedSecrets = Object.entries(secrets).map(([key, value]) => ({
+    key,
+    value: decrypt(value)
   }));
 
   const newDek = crypto.randomBytes(32);
@@ -238,6 +238,6 @@ export const deleteSecret = async (key) => {
 };
 
 export const getAllSecretKeys = async () => {
-  const secrets = await etcd.get(SECRETS_PREFIX, { isPrefix: true }).all();
-  return secrets.map(s => s.key.replace(SECRETS_PREFIX, ''));
+  const secrets = await etcd.getAll().prefix(SECRETS_PREFIX).keys();
+  return secrets;
 };

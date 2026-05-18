@@ -95,6 +95,8 @@ vrrp_instance VI_DNS {
       }
     }
 
+    if (!container) return;
+
     const inspect = await container.inspect();
     if (!inspect.State.Running) {
       await container.start();
@@ -108,7 +110,6 @@ vrrp_instance VI_DNS {
 
   } catch (err) {
     console.error('[Reconciler] DNS VIP reconcile failed:', err.message);
-    throw err; 
   }
 };
 
@@ -122,7 +123,7 @@ const reconcileCoreDNS = async (localNodeId) => {
       nodes = await getNodes();
     } catch (nodeErr) {
       console.warn(`[Reconciler] Failed to fetch nodes for CoreDNS: ${nodeErr.message}. Retrying soon.`);
-      return; // Skip this run, will be retried by the main loop
+      return;
     }
     
     let staticEntries = '';
@@ -152,7 +153,6 @@ ${staticEntries}
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
     }
-    // If it exists but is a directory (docker sometimes creates it as such if mount fails)
     if (fs.existsSync(corefilePath) && fs.lstatSync(corefilePath).isDirectory()) {
       fs.rmdirSync(corefilePath, { recursive: true });
     }
@@ -167,11 +167,8 @@ ${staticEntries}
         const image = 'coredns/coredns:latest';
         await ensureImage(image);
 
-        // Detect if we are in local development/simulation vs production
         const isClusterSim = !!process.env.NODE_ID;
         const dnsHostPort = isClusterSim ? (5300 + parseInt(localNodeId.replace(/\D/g, '') || 0)) : 5353;
-        
-        // If the user wants port 53 in production, we check an env var or assume lack of NODE_ID
         const finalPort = process.env.DNS_PRODUCTION === 'true' ? '53' : dnsHostPort.toString();
 
         console.log(`[Reconciler] CoreDNS binding to host port ${finalPort}`);
@@ -196,11 +193,12 @@ ${staticEntries}
       }
     }
 
+    if (!container) return;
+
     const inspect = await container.inspect();
     if (!inspect.State.Running) {
       await container.start();
     } else {
-      // CoreDNS supports SIGHUP to reload config.
       try {
         await container.kill({ signal: 'SIGHUP' });
         console.log('[Reconciler] Sent SIGHUP to CoreDNS to reload Corefile');
@@ -210,7 +208,6 @@ ${staticEntries}
     }
   } catch (err) {
     console.error('[Reconciler] CoreDNS reconcile failed:', err.message);
-    throw err;
   }
 };
 
@@ -284,7 +281,9 @@ export const reconcileContainers = async (localNodeId) => {
     }
 
     try {
-      const inspect = await container.inspect();
+    if (!container) return;
+
+    const inspect = await container.inspect();
       await updateContainerDockerId(saved.id, inspect.Id);
 
       if (!inspect.State.Running) {
@@ -303,4 +302,31 @@ export const reconcileContainers = async (localNodeId) => {
 } catch (globalErr) {
   console.error(`[Reconciler] Fatal error in reconciliation loop: ${globalErr.message}`);
 }
+};
+
+let reconcilerInterval = null;
+
+export const startReconciler = (localNodeId) => {
+  if (reconcilerInterval) {
+    clearInterval(reconcilerInterval);
+  }
+  console.log('[Reconciler] Starting periodic DNS reconciliation (120s interval)...');
+  reconcilerInterval = setInterval(async () => {
+    try {
+      await reconcileCoreDNS(localNodeId);
+      if (!isNodeSealed()) {
+        await reconcileDNSVIP(localNodeId);
+      }
+    } catch (e) {
+      console.error('[Reconciler] Periodic reconciliation error:', e.message);
+    }
+  }, 120000);
+};
+
+export const stopReconciler = () => {
+  if (reconcilerInterval) {
+    clearInterval(reconcilerInterval);
+    reconcilerInterval = null;
+    console.log('[Reconciler] Stopped.');
+  }
 };

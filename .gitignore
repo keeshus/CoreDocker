@@ -18,3 +18,4 @@ vm/*.qcow2
 vm/*.iso
 vm/pids/
 .kilo/
+data/

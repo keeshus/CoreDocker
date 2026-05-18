@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useUI } from '../lib/UIProvider';
 
 export default function CreateGroup({ onCreated, initialData = null, onClose = null, isOpenMode = false }) {
+  const { showToast } = useUI();
   const [isOpen, setIsOpen] = useState(isOpenMode);
   const [loading, setLoading] = useState(false);
   
@@ -64,10 +66,10 @@ export default function CreateGroup({ onCreated, initialData = null, onClose = n
         if (onCreated) onCreated();
       } else {
         const error = await res.json();
-        alert('Error: ' + JSON.stringify(error));
+        showToast('Error: ' + JSON.stringify(error), 'error');
       }
     } catch (err) {
-      alert('Error saving group: ' + err.message);
+      showToast('Error saving group: ' + err.message, 'error');
     }
     setLoading(false);
   };

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { buildContainerPayload, parseEnvFromInitialData, parseHaAllowedNodes } from '../lib/domain-logic';
+import { buildContainerPayload, parseEnvFromInitialData } from '../lib/domain-logic';
+import { useUI } from '../lib/UIProvider';
 
 export default function CreateContainer({ onCreated, initialData = null, onClose = null, isOpenMode = false }) {
+  const { showToast } = useUI();
   const [isOpen, setIsOpen] = useState(isOpenMode);
   const [loading, setLoading] = useState(false);
   const [secrets, setSecrets] = useState([]);
@@ -17,8 +19,6 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     resources: { cpu: '', memory: '' },
     proxy: { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
     group: '',
-    ha: false,
-    ha_allowed_nodes: [],
     tmpfs: '',
     stopGracePeriod: '',
     shmSize: '',
@@ -31,8 +31,8 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
 
   useEffect(() => {
     fetch('/api/secrets')
-      .then(res => res.json())
-      .then(data => setSecrets(data || []))
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setSecrets(Array.isArray(data) ? data : []))
       .catch(err => console.error('Failed to fetch secrets:', err));
     fetch('/api/groups')
       .then(res => res.json())
@@ -57,7 +57,6 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
         ports: initialData.ports?.length ? initialData.ports : [{ host: '', container: '', ip: '0.0.0.0' }],
         resources: initialData.resources || { cpu: '', memory: '' },
         proxy: initialData.proxy || { enabled: false, uri: '', port: '', domain: '', sslCert: '', sslKey: '' },
-        ha: initialData.ha || false,
         tmpfs: initialData.tmpfs || '',
         stopGracePeriod: initialData.stopGracePeriod || '',
         shmSize: initialData.shmSize || '',
@@ -117,10 +116,10 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
         if (onCreated) onCreated();
       } else {
         const error = await res.json();
-        alert('Error: ' + JSON.stringify(error));
+        showToast('Error: ' + JSON.stringify(error), 'error');
       }
     } catch (err) {
-      alert('Error saving container: ' + err.message);
+      showToast('Error saving container: ' + err.message, 'error');
     }
     setLoading(false);
   };
@@ -163,6 +162,21 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                   <option value="unless-stopped">unless-stopped</option>
                   <option value="on-failure">on-failure</option>
                 </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Group</label>
+                <select
+                  value={formData.group || ''}
+                  onChange={e => setFormData({...formData, group: e.target.value})}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                >
+                  <option value="">-- No Group --</option>
+                  {groups.map(g => (
+                    <option key={g.id} value={g.name}>{g.name} {g.config?.highAvailability ? '(HA Group)' : ''}</option>
+                  ))}
+                </select>
+                <small style={{ color: '#64748b' }}>Containers with the same group name are linked in an isolated network.</small>
               </div>
 
               <details>
@@ -291,44 +305,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                 </div>
               </details>
 
-              <details>
-                <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Container Group & HA Configuration</summary>
-                <div style={{ padding: '15px', border: '1px solid #f1f5f9', borderTop: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <span style={{ fontWeight: 'bold', color: '#475569' }}>Group Name</span>
-                    <select
-                      value={formData.group || ''}
-                      onChange={e => setFormData({...formData, group: e.target.value})}
-                      style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-                    >
-                      <option value="">-- No Group --</option>
-                      {groups.map(g => (
-                        <option key={g.id} value={g.id}>{g.name} {g.config?.highAvailability ? '(HA Group)' : ''}</option>
-                      ))}
-                    </select>
-                    <small style={{ color: '#64748b' }}>Containers with the same group name are linked in an isolated network.</small>
-                  </label>
-                  
-                  {(!formData.group || !groups.find(g => g.id === formData.group)?.config?.highAvailability) ? (
-                    <>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
-                        <input
-                          type="checkbox"
-                          checked={formData.ha}
-                          onChange={e => setFormData({...formData, ha: e.target.checked})}
-                        />
-                        <span style={{ fontWeight: 'bold', color: '#475569' }}>High Availability (HA) Failover</span>
-                      </label>
-                      <small style={{ color: '#64748b', marginLeft: '25px' }}>If enabled, this container group will automatically fail over to a healthy node if its current host fails.</small>
-                    </>
-                  ) : (
-                    <div style={{ padding: '10px', background: '#ecfdf5', borderRadius: '4px', border: '1px solid #10b981', color: '#065f46', fontSize: '0.85em', marginTop: '10px' }}>
-                      <strong>High Availability inherited from Group</strong>
-                      <p style={{ margin: '5px 0 0 0' }}>This container will follow the group's HA rules.</p>
-                    </div>
-                  )}
-                </div>
-              </details>
+
 
               <details>
                 <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Target Node</summary>
@@ -388,29 +365,6 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                   </label>
                   <small style={{ color: '#64748b', marginLeft: '25px', marginTop: '-5px' }}>Run the container with full host access. Use with caution.</small>
 
-                  <div style={{ marginTop: '15px', borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <input
-                        type="checkbox"
-                        checked={formData.ha}
-                        onChange={e => setFormData({...formData, ha: e.target.checked})}
-                      />
-                      <span style={{ fontWeight: 'bold', color: '#475569', fontSize: '0.9em' }}>Enable High Availability (ETCD-DNS)</span>
-                    </label>
-                    {formData.ha && (
-                      <div style={{ marginTop: '10px', marginLeft: '25px' }}>
-                        <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '0.85em' }}>Allowed Nodes (comma separated ID's, empty = any)</label>
-                        <input 
-                          type="text" 
-                          placeholder="e.g. node-1,node-2" 
-                          value={formData.ha_allowed_nodes.join(',')} 
-                          onChange={e => setFormData({...formData, ha_allowed_nodes: parseHaAllowedNodes(e.target.value)})} 
-                          style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
-                        />
-                      </div>
-                    )}
-                  </div>
-                  
                 </div>
               </details>
 
