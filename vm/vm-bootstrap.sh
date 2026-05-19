@@ -8,6 +8,7 @@
 set -euo pipefail
 
 NODE_NAME="${1:-$(hostname)}"
+REPO_DIR="/opt/coredocker"
 
 log() { echo "[bootstrap] $*"; }
 

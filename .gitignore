@@ -14,8 +14,11 @@ yarn-error.log*
 .idea
 .vscode
 # VM related files
-vm/*.qcow2
-vm/*.iso
-vm/pids/
+vm/disks/
+vm/cloud-init-build/
+vm/ssh-keys/
+vm/noble-server-cloudimg-amd64.img
+vm/repo.tar.gz
+vm/serve.py
 .kilo/
 data/

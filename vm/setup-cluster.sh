@@ -18,7 +18,7 @@ CLUSTER_SUBNET="192.168.100.0/24"
 CLUSTER_GATEWAY="192.168.100.1"
 DOMAIN="coredocker.local"
 
-VM_MEMORY_MB=2048
+VM_MEMORY_MB=3072
 VM_CPUS=2
 VM_DISK_GB=10
 
@@ -33,9 +33,9 @@ TARBALL_PORT=9999
 
 # Node definitions: name:ip:mac:is_first
 NODES=(
-  "node-1:192.168.100.10:52:54:00:c0:de:01:true"
-  "node-2:192.168.100.11:52:54:00:c0:de:02:false"
-  "node-3:192.168.100.12:52:54:00:c0:de:03:false"
+  "node-1|192.168.100.10|52:54:00:c0:de:01|true"
+  "node-2|192.168.100.11|52:54:00:c0:de:02|false"
+  "node-3|192.168.100.12|52:54:00:c0:de:03|false"
 )
 
 # ════════════════════════════════════════════════════════
@@ -113,10 +113,11 @@ start_http_server() {
   else
     log "Creating repo tarball (excluding node_modules, .git, etc.)..."
     cd "$PROJECT_DIR"
-    tar czf "$SCRIPT_DIR/repo.tar.gz" \
+    tar czf /tmp/repo.tar.gz \
       --exclude='.git' \
       --exclude='node_modules' \
-      . 2>/dev/null
+      .
+    mv /tmp/repo.tar.gz "$SCRIPT_DIR/repo.tar.gz"
   fi
 
   log "Starting HTTP server on port $TARBALL_PORT..."
@@ -242,14 +243,14 @@ create_vm() {
     --memory "$VM_MEMORY_MB" \
     --vcpus "$VM_CPUS" \
     --disk "$disk_file,device=disk,bus=virtio" \
-    --disk "$seed_iso,device=cdrom,bus=ide" \
+    --disk "$seed_iso,device=cdrom,bus=sata" \
     --network "network=${CLUSTER_NET_NAME},mac=${node_mac},model=virtio" \
     --graphics none \
     --console pty \
     --serial pty \
     --os-variant ubuntu24.04 \
     --import \
-    --noautoconsole 2>/dev/null
+    --noautoconsole
 }
 
 # ════════════════════════════════════════════════════════
@@ -275,7 +276,7 @@ wait_for_vm() {
 # 8. Wait for CoreDocker health
 # ════════════════════════════════════════════════════════
 wait_for_health() {
-  local node_ip="$1" timeout=120 interval=5 elapsed=0
+  local node_ip="$1" timeout=600 interval=10 elapsed=0
   log "Waiting for CoreDocker health on $node_ip..."
   while [ "$elapsed" -lt "$timeout" ]; do
     if curl -sf "http://${node_ip}/api/health" >/dev/null 2>&1; then
@@ -324,7 +325,7 @@ main() {
   rm -rf "$SCRIPT_DIR/cloud-init-build"
   local seed_isos=()
   for node_def in "${NODES[@]}"; do
-    IFS=':' read -r name ip mac is_first <<< "$node_def"
+    IFS='|' read -r name ip mac is_first <<< "$node_def"
     log "  $name ($ip)"
     local iso; iso="$(generate_cloud_init "$name" "$ip")"
     seed_isos+=("$iso|$name|$ip|$mac|$is_first")

@@ -5,7 +5,7 @@
       <port start='1024' end='65535'/>
     </nat>
   </forward>
-  <bridge name='virbr-coredocker' stp='on' delay='0'/>
+  <bridge name='virbr-cd' stp='on' delay='0'/>
   <domain name='coredocker.local'/>
   <ip address='192.168.100.1' netmask='255.255.255.0'>
     <dhcp>
