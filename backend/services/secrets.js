@@ -234,10 +234,10 @@ export const setSecret = async (key, value) => {
 };
 
 export const deleteSecret = async (key) => {
-  await etcd.delete(`${SECRETS_PREFIX}${key}`);
+  await etcd.delete().key(`${SECRETS_PREFIX}${key}`);
 };
 
 export const getAllSecretKeys = async () => {
   const secrets = await etcd.getAll().prefix(SECRETS_PREFIX).keys();
-  return secrets;
+  return secrets.map(key => key.replace(SECRETS_PREFIX, ''));
 };

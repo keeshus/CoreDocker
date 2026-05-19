@@ -147,49 +147,84 @@ ${staticEntries}
 }
 `;
 
-    // Always ensure the config directory and file exist on the host
-    const configDir = '/tmp/coredns';
-    const corefilePath = path.join(configDir, 'Corefile');
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
+    // Write Corefile to a host-volume-backed path so the Docker bind mount
+    // in the CoreDNS container actually resolves to a real file on the host.
+    // The backend container's /tmp is tmpfs (container-local only), so using
+    // /tmp would write to a path invisible to the Docker host.
+    let hostBindSrc;
+    const volumeBase = '/mnt/backup';
+    if (fs.existsSync(volumeBase) && process.env.HOST_BACKUP_PATH) {
+      const dir = path.join(volumeBase, 'coredns');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const corefilePath = path.join(dir, 'Corefile');
+      fs.writeFileSync(corefilePath, corefile);
+      hostBindSrc = path.join(process.env.HOST_BACKUP_PATH, 'coredns', 'Corefile');
+    } else {
+      // Fallback — may not work in read-only containers without tmpfs
+      const dir = '/tmp/coredns';
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const fp = path.join(dir, 'Corefile');
+      if (fs.existsSync(fp) && fs.lstatSync(fp).isDirectory()) {
+        fs.rmdirSync(fp, { recursive: true });
+      }
+      fs.writeFileSync(fp, corefile);
+      hostBindSrc = fp;
     }
-    if (fs.existsSync(corefilePath) && fs.lstatSync(corefilePath).isDirectory()) {
-      fs.rmdirSync(corefilePath, { recursive: true });
+
+    let image;
+    const createContainer = async () => {
+      console.log('[Reconciler] Creating CoreDNS container...');
+      image = image || 'coredns/coredns:latest';
+      await ensureImage(image);
+
+      const isClusterSim = !!process.env.NODE_ID;
+      const dnsHostPort = isClusterSim ? (5300 + parseInt(localNodeId.replace(/\D/g, '') || 0)) : 5353;
+      const finalPort = process.env.DNS_PRODUCTION === 'true' ? '53' : dnsHostPort.toString();
+
+      console.log(`[Reconciler] CoreDNS binding to host port ${finalPort}`);
+
+      container = await docker.createContainer({
+        Image: image,
+        name: containerName,
+        Cmd: ['-conf', '/etc/coredns/Corefile'],
+        HostConfig: {
+          Binds: [`${hostBindSrc}:/etc/coredns/Corefile`],
+          PortBindings: {
+            '53/udp': [{ HostPort: finalPort }],
+            '53/tcp': [{ HostPort: finalPort }]
+          },
+          RestartPolicy: { Name: 'always' },
+          NetworkMode: 'backhaul'
+        }
+      });
+
+      await container.start();
+      console.log('[Reconciler] CoreDNS started with volume-mounted Corefile');
+    };
+
+    // Clean up any stale/broken CoreDNS container before trying to reconcile.
+    // The container may exist in "created" state with a stale network reference
+    // (e.g. after docker-compose down/up recreates the backhaul network).
+    try {
+      const stale = docker.getContainer(containerName);
+      const staleInspect = await stale.inspect();
+      if (!staleInspect.State.Running || staleInspect.State.Error) {
+        console.log(`[Reconciler] Removing stale CoreDNS container (state: ${staleInspect.State.Status}, error: "${staleInspect.State.Error || 'none'}")...`);
+        await stale.remove({ force: true });
+      }
+    } catch (e) {
+      // 404 means container doesn't exist — that's fine
+      if (e.statusCode !== 404) {
+        console.warn(`[Reconciler] Unexpected error inspecting CoreDNS: ${e.message}`);
+      }
     }
-    fs.writeFileSync(corefilePath, corefile);
 
     try {
       container = docker.getContainer(containerName);
       await container.inspect();
     } catch (e) {
       if (e.statusCode === 404) {
-        console.log('[Reconciler] Creating CoreDNS container...');
-        const image = 'coredns/coredns:latest';
-        await ensureImage(image);
-
-        const isClusterSim = !!process.env.NODE_ID;
-        const dnsHostPort = isClusterSim ? (5300 + parseInt(localNodeId.replace(/\D/g, '') || 0)) : 5353;
-        const finalPort = process.env.DNS_PRODUCTION === 'true' ? '53' : dnsHostPort.toString();
-
-        console.log(`[Reconciler] CoreDNS binding to host port ${finalPort}`);
-
-        container = await docker.createContainer({
-          Image: image,
-          name: containerName,
-          Cmd: ['-conf', '/etc/coredns/Corefile'],
-          HostConfig: {
-            Binds: [`${configDir}/Corefile:/etc/coredns/Corefile`],
-            PortBindings: {
-              '53/udp': [{ HostPort: finalPort }],
-              '53/tcp': [{ HostPort: finalPort }]
-            },
-            RestartPolicy: { Name: 'always' },
-            NetworkMode: 'backhaul'
-          }
-        });
-        
-        await container.start();
-        console.log('[Reconciler] CoreDNS started with volume-mounted Corefile');
+        await createContainer();
       }
     }
 
@@ -197,7 +232,13 @@ ${staticEntries}
 
     const inspect = await container.inspect();
     if (!inspect.State.Running) {
-      await container.start();
+      try {
+        await container.start();
+      } catch (startErr) {
+        console.error(`[Reconciler] Failed to start CoreDNS: ${startErr.message}. Removing and recreating.`);
+        await container.remove({ force: true });
+        await createContainer();
+      }
     } else {
       try {
         await container.kill({ signal: 'SIGHUP' });

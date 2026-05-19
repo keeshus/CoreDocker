@@ -22,10 +22,34 @@ const mockDbDefault = {
       return Promise.resolve();
     },
   })),
-  delete: vi.fn((key) => {
-    delete etcdStore[key];
-    return Promise.resolve();
-  }),
+  delete: vi.fn(() => ({
+    key: (k) => {
+      delete etcdStore[k];
+      return Promise.resolve();
+    },
+  })),
+  getAll: vi.fn(() => ({
+    prefix: () => ({
+      keys: () => {
+        const keys = [];
+        for (const k of Object.keys(etcdStore)) {
+          if (k.startsWith('secrets/')) {
+            keys.push(k);
+          }
+        }
+        return Promise.resolve(keys);
+      },
+      strings: () => {
+        const results = {};
+        for (const [k, v] of Object.entries(etcdStore)) {
+          if (k.startsWith('secrets/')) {
+            results[k] = v;
+          }
+        }
+        return Promise.resolve(results);
+      },
+    }),
+  })),
 };
 
 vi.mock('../../backend/services/db.js', () => ({

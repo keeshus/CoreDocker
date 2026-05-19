@@ -13,7 +13,7 @@ services:
       - ETCD_IMAGE=${ETCD_IMAGE:-gcr.io/etcd-development/etcd:v3.6.8}
       - NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.25.4-alpine}
       - ALPINE_IMAGE=${ALPINE_IMAGE:-alpine:3.19}
-      - DNS_PRODUCTION=true
+      - DNS_PRODUCTION=false
       - NODE_DOMAIN=${NODE_DOMAIN:-node-1.local}
       - NODE_IP=${NODE_IP:-127.0.0.1}
       - HOST_BACKUP_PATH=${HOST_BACKUP_PATH:-${PWD}/data/backup}
