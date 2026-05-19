@@ -1,7 +1,7 @@
 import express from 'express';
 import docker from '../services/docker.js';
 import etcd from '../services/db.js';
-import { addRoute, removeRoute } from '../services/nginx.js';
+import { addRoute, removeRoute, getNodeUrl } from '../services/nginx.js';
 import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig, getContainers, getNodes } from '../services/db.js';
 import { generateClusterToken } from '../services/secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
@@ -45,7 +45,7 @@ const proxyToNode = async (nodeId, req, res) => {
     const node = nodes.find(n => n.id === targetNodeId);
     if (node) {
       const token = generateClusterToken({ node: process.env.NODE_ID });
-      const url = `http://${node.ip}:${process.env.PORT || 3000}${req.originalUrl}`;
+      const url = `${getNodeUrl(node.ip)}${req.originalUrl}`;
 
       const options = {
         method: req.method,

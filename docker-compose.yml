@@ -6,9 +6,9 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${CERTS_LOCATION:-./nginx/ssl}:/etc/certs:ro
-      - ${BACKUP_LOCATION:-./data/backup}:/mnt/backup
-      - ${NONBACKUP_LOCATION:-./data/nonbackup}:/mnt/non-backup
+      - ${HOST_CERTS_PATH:-./nginx/ssl}:/etc/certs:ro
+      - ${HOST_BACKUP_PATH:-./data/backup}:/mnt/backup
+      - ${HOST_NONBACKUP_PATH:-./data/nonbackup}:/mnt/non-backup
     environment:
       - ETCD_IMAGE=${ETCD_IMAGE:-gcr.io/etcd-development/etcd:v3.6.8}
       - NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.25.4-alpine}

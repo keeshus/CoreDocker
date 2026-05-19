@@ -2,6 +2,7 @@ import express from 'express';
 import docker from '../services/docker.js';
 import { getNodes } from '../services/db.js';
 import { generateClusterToken } from '../services/secrets.js';
+import { getNodeUrl } from '../services/nginx.js';
 
 const router = express.Router();
 
@@ -64,7 +65,7 @@ router.get('/', async (req, res) => {
           for (const node of nodes) {
             if (node.id === (process.env.NODE_ID || 'master')) continue;
             const token = generateClusterToken({ node: process.env.NODE_ID });
-            const resp = await fetch(`http://${node.ip}:${process.env.PORT || 3000}/api/events`, {
+            const resp = await fetch(`${getNodeUrl(node.ip)}/api/events`, {
               headers: { 'Authorization': `Bearer ${token}` }
             });
             if (resp.body) {

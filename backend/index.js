@@ -18,7 +18,7 @@ import {bootstrapEtcd, addEtcdMember} from './services/etcd-cluster.js';
 import {closeEtcd, registerLocalNode, waitForEtcd, saveNode} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
-import {bootstrapNginx} from './services/nginx.js';
+import {bootstrapNginx, getNodeUrl} from './services/nginx.js';
 import {startLogger} from './services/logger.js';
 import docker from './services/docker.js';
 import {runMigrations} from './services/migrations.js';
@@ -217,7 +217,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       await registerLocalNode(nodeId, nodeName, nodeIp);
       await bootCluster(nodeId);
     } else if (mode === 'join') {
-      const joinRes = await fetch(`http://${primaryIp}:${process.env.PORT || 3000}/api/system/join`, {
+      const joinRes = await fetch(`${getNodeUrl(primaryIp)}/api/system/join`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

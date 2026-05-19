@@ -1,0 +1,135 @@
+services:
+  frontend-2:
+    container_name: core-docker-frontend-2
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    user: nodejs
+    environment:
+      - BACKEND_HOST=backend-2
+    depends_on:
+      - backend-2
+    networks:
+      - backhaul
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    ports:
+      - "3010:3000"
+
+  backend-2:
+    container_name: core-docker-backend-2
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./nginx/ssl:/etc/certs:ro
+      - ./data/backup:/mnt/backup
+      - ./data/nonbackup:/mnt/non-backup
+    environment:
+      - ETCD_IMAGE=${ETCD_IMAGE:-gcr.io/etcd-development/etcd:v3.6.8}
+      - NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.25.4-alpine}
+      - ALPINE_IMAGE=${ALPINE_IMAGE:-alpine:3.19}
+      - DNS_PRODUCTION=false
+      - NODE_DOMAIN=node-2.local
+      - NODE_IP=127.0.0.2
+      - HOST_BACKUP_PATH=${HOST_BACKUP_PATH:-${PWD}/data/backup}
+      - HOST_NONBACKUP_PATH=${HOST_NONBACKUP_PATH:-${PWD}/data/nonbackup}
+      - NODE_ID=node-2
+      - NODE_NAME=node-2
+      - PORT=3000
+      - CORS_ORIGIN=${CORS_ORIGIN:-true}
+      - KEEPALIVED_PASSWORD=${KEEPALIVED_PASSWORD:-c0r3d0ck3r}
+      - ETCD_HOSTS=http://core-docker-etcd:2379
+    group_add:
+      - 986
+    networks:
+      backhaul:
+        ipv4_address: 172.20.0.12
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+
+  frontend-3:
+    container_name: core-docker-frontend-3
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    user: nodejs
+    environment:
+      - BACKEND_HOST=backend-3
+    depends_on:
+      - backend-3
+    networks:
+      - backhaul
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    ports:
+      - "3011:3000"
+
+  backend-3:
+    container_name: core-docker-backend-3
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./nginx/ssl:/etc/certs:ro
+      - ./data/backup:/mnt/backup
+      - ./data/nonbackup:/mnt/non-backup
+    environment:
+      - ETCD_IMAGE=${ETCD_IMAGE:-gcr.io/etcd-development/etcd:v3.6.8}
+      - NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.25.4-alpine}
+      - ALPINE_IMAGE=${ALPINE_IMAGE:-alpine:3.19}
+      - DNS_PRODUCTION=false
+      - NODE_DOMAIN=node-3.local
+      - NODE_IP=127.0.0.3
+      - HOST_BACKUP_PATH=${HOST_BACKUP_PATH:-${PWD}/data/backup}
+      - HOST_NONBACKUP_PATH=${HOST_NONBACKUP_PATH:-${PWD}/data/nonbackup}
+      - NODE_ID=node-3
+      - NODE_NAME=node-3
+      - PORT=3000
+      - CORS_ORIGIN=${CORS_ORIGIN:-true}
+      - KEEPALIVED_PASSWORD=${KEEPALIVED_PASSWORD:-c0r3d0ck3r}
+      - ETCD_HOSTS=http://core-docker-etcd:2379
+    group_add:
+      - 986
+    networks:
+      backhaul:
+        ipv4_address: 172.20.0.13
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+
+networks:
+  backhaul:
+    name: backhaul
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24

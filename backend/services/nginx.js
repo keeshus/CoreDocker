@@ -7,6 +7,29 @@ const NGINX_CONF_DIR = `${SYSTEM_NAMESPACE}/nginx/conf.d`;
 const NGINX_LOCATIONS_DIR = `${SYSTEM_NAMESPACE}/nginx/conf.d/locations`;
 const NGINX_SSL_DIR = `${SYSTEM_NAMESPACE}/nginx/ssl`;
 
+// Determined during bootstrapNginx — used by cross-node API calls
+let publicProtocol = 'http';
+let publicPort = 80;
+
+export function getNodeUrl(nodeIp) {
+  return `${publicProtocol}://${nodeIp}:${publicPort}`;
+}
+
+async function detectPublicEndpoint() {
+    const hostCertPath = '/etc/certs';
+    const certsExist = await runEphemeralTask('alpine', ['ls', `${hostCertPath}/fullchain.pem`], {
+        HostConfig: { Binds: [`${hostCertPath}:${hostCertPath}:ro`] }
+    }).then(res => res.exitCode === 0).catch(() => false);
+
+    if (certsExist) {
+        publicProtocol = 'https';
+        publicPort = 443;
+    } else {
+        publicProtocol = 'http';
+        publicPort = 80;
+    }
+}
+
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
     // Validation
     const domainRegex = /^[a-zA-Z0-9.-]+$/;
@@ -121,7 +144,10 @@ export async function reloadNginx() {
 export async function bootstrapNginx() {
     const CONTAINER_NAME = 'core-docker-proxy';
     const NGINX_IMAGE = process.env.NGINX_IMAGE || 'nginx:latest';
-    
+
+    // Determine public endpoint before any early return
+    await detectPublicEndpoint();
+
     // Remove stale container if it exists (from a previous failed bootstrap)
     try {
         const container = docker.getContainer(CONTAINER_NAME);
@@ -152,21 +178,15 @@ export async function bootstrapNginx() {
         });
     }
     
-    // Check if host certificates exist (now expected at /etc/certs mounted from Compose)
-    const hostCertPath = '/etc/certs';
-    const certsExist = await runEphemeralTask('alpine', ['ls', `${hostCertPath}/fullchain.pem`], {
-        HostConfig: { Binds: [`${hostCertPath}:${hostCertPath}:ro`] }
-    }).then(res => res.exitCode === 0).catch(() => false);
-
     const binds = [
         `${backupPath}/${SYSTEM_NAMESPACE}/nginx/conf.d:/etc/nginx/conf.d`,
         `${backupPath}/${SYSTEM_NAMESPACE}/nginx/ssl:/etc/nginx/ssl`
     ];
 
-    if (certsExist) {
-        binds.push(`${hostCertPath}:/etc/nginx/ssl/host:ro`);
+    if (publicProtocol === 'https') {
+        binds.push('/etc/certs:/etc/nginx/ssl/host:ro');
     } else {
-        logEvent('nginx', 'warn', `No host certificates found at ${hostCertPath}, generating self-signed...`);
+        logEvent('nginx', 'warn', 'No host certificates found, generating self-signed...');
         const selfSignedPath = `${backupPath}/${SYSTEM_NAMESPACE}/nginx/ssl/host`;
         await runEphemeralTask('alpine', [
             'sh', '-c',
