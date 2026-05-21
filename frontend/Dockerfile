@@ -29,10 +29,10 @@ WORKDIR /app
 RUN chown nodejs:nodejs /app
 
 # Copy the frontend workspace package and built assets as the non-root user
-COPY --link --from=builder --chown=nodejs:nodejs /app/package.json ./package.json
-COPY --link --from=builder --chown=nodejs:nodejs /app/frontend/package.json ./frontend/package.json
-COPY --link --from=builder --chown=nodejs:nodejs /app/frontend/.next ./frontend/.next
-COPY --link --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nodejs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nodejs:nodejs /app/frontend/package.json ./frontend/package.json
+COPY --from=builder --chown=nodejs:nodejs /app/frontend/.next ./frontend/.next
+COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 
 # Use the non-root user
 USER nodejs

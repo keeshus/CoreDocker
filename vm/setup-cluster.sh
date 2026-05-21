@@ -5,7 +5,8 @@
 #   sudo, virsh, virt-install, genisoimage, qemu-img, curl
 #
 # Usage:
-#   sudo bash vm/setup-cluster.sh
+#   sudo bash vm/setup-cluster.sh          # run if VMs already exist
+#   sudo bash vm/setup-cluster.sh --recreate  # destroy + recreate fresh
 #
 set -euo pipefail
 
@@ -98,7 +99,16 @@ generate_ssh_key() {
 # 3. Create libvirt network
 # ════════════════════════════════════════════════════════
 create_network() {
-  virsh net-info "$CLUSTER_NET_NAME" &>/dev/null && { log "Network exists."; return; }
+  if virsh net-info "$CLUSTER_NET_NAME" &>/dev/null; then
+    local state; state="$(virsh net-info "$CLUSTER_NET_NAME" | grep 'Active:' | awk '{print $2}')"
+    if [ "$state" = "no" ]; then
+      log "Starting existing network $CLUSTER_NET_NAME..."
+      virsh net-start "$CLUSTER_NET_NAME"
+    else
+      log "Network $CLUSTER_NET_NAME exists and is active."
+    fi
+    return
+  fi
   log "Creating libvirt network..."
   virsh net-define "$SCRIPT_DIR/network.xml"
   virsh net-start "$CLUSTER_NET_NAME"
@@ -228,6 +238,19 @@ USERDATA
 # ════════════════════════════════════════════════════════
 create_vm() {
   local node_name="$1" node_ip="$2" node_mac="$3" seed_iso="$4"
+
+  # Check if VM already exists
+  if virsh dominfo "$node_name" &>/dev/null; then
+    local state; state="$(virsh dominfo "$node_name" | grep 'State:' | awk '{print $2}')"
+    if [ "$state" = "shut" ] || [ "$state" = "off" ]; then
+      log "VM $node_name exists and is off. Starting..."
+      virsh start "$node_name"
+    else
+      log "VM $node_name is already running."
+    fi
+    return
+  fi
+
   local disk_file="$SCRIPT_DIR/disks/${node_name}.qcow2"
   mkdir -p "$SCRIPT_DIR/disks"
 
@@ -291,9 +314,32 @@ wait_for_health() {
 }
 
 # ════════════════════════════════════════════════════════
-# Main
+# 0. Destroy (for --recreate)
 # ════════════════════════════════════════════════════════
+destroy_cluster() {
+  log "Recreate flag: destroying existing VMs and network..."
+  for vm in node-1 node-2 node-3; do
+    if virsh dominfo "$vm" &>/dev/null; then
+      virsh destroy "$vm" 2>/dev/null || true
+      virsh undefine "$vm" 2>/dev/null || true
+    fi
+  done
+  if virsh net-info "$CLUSTER_NET_NAME" &>/dev/null; then
+    virsh net-destroy "$CLUSTER_NET_NAME" 2>/dev/null || true
+    virsh net-undefine "$CLUSTER_NET_NAME" 2>/dev/null || true
+  fi
+  rm -rf "$SCRIPT_DIR/disks" "$SCRIPT_DIR/cloud-init-build" "$SCRIPT_DIR/repo.tar.gz" "$SCRIPT_DIR/serve.py"
+  log "Clean slate ready."
+}
+
 main() {
+  # Parse --recreate flag
+  local recreate=false
+  for arg in "$@"; do
+    if [ "$arg" = "--recreate" ]; then
+      recreate=true
+    fi
+  done
   echo ""
   echo "╔══════════════════════════════════════════╗"
   echo "║    CoreDocker Cluster VM Setup           ║"
@@ -306,6 +352,10 @@ main() {
   fi
 
   check_prereqs
+
+  if [ "$recreate" = true ]; then
+    destroy_cluster
+  fi
 
   # Phase 1: Prep
   log "Phase 1/7: Downloading cloud image..."
