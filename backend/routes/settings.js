@@ -9,8 +9,11 @@ router.get('/', async (req, res) => {
     const data = await etcd.get(SETTINGS_KEY).string();
     const settings = data ? JSON.parse(data) : {
       sharedIpPool: '',
-      backhaulNetwork: '',
+      internalNetwork: '',
       dnsVip: '',
+      dnsVipInterface: '',
+      dnsForwarder: '',
+      clusterDomain: '',
       clusterDomain: '',
       clusterVip: '',
     };

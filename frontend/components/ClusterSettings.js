@@ -5,7 +5,7 @@ import { useUI } from '../lib/UIProvider';
 
 export default function ClusterSettings() {
   const { showToast, showConfirm } = useUI();
-  const [settings, setSettings] = useState({ sharedIpPool: '', backhaulNetwork: '', dnsVip: '', clusterDomain: '', clusterVip: '' });
+  const [settings, setSettings] = useState({ sharedIpPool: '', internalNetwork: '', dnsVip: '', dnsVipInterface: '', dnsForwarder: '', clusterDomain: '', clusterVip: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -207,15 +207,39 @@ export default function ClusterSettings() {
         </div>
 
         <div>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Backhaul Network Interface / IP Range</label>
-          <input 
-            type="text" 
-            value={settings.backhaulNetwork} 
-            onChange={e => setSettings({...settings, backhaulNetwork: e.target.value})}
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Internal Network Interface / IP Range</label>
+          <input
+            type="text"
+            value={settings.internalNetwork}
+            onChange={e => setSettings({...settings, internalNetwork: e.target.value})}
             placeholder="e.g. eth1 or 10.0.0.0/24"
             style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
           />
-          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Dedicated network for internal cluster traffic (ETCD, Sync).</small>
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Dedicated network for internal cluster traffic (ETCD, cross-node sync).</small>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>DNS VIP Interface</label>
+          <input
+            type="text"
+            value={settings.dnsVipInterface}
+            onChange={e => setSettings({...settings, dnsVipInterface: e.target.value})}
+            placeholder="e.g. eth0 (leave empty for auto-detect)"
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+          />
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Physical interface for the DNS VIP (auto-detected from node IP if left empty).</small>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>DNS Upstream Forwarder</label>
+          <input
+            type="text"
+            value={settings.dnsForwarder}
+            onChange={e => setSettings({...settings, dnsForwarder: e.target.value})}
+            placeholder="e.g. 192.168.1.1 (your router/gateway)"
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+          />
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Upstream DNS server CoreDNS forwards unresolved queries to.</small>
         </div>
 
         <div>

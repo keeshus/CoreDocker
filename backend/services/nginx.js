@@ -201,8 +201,8 @@ export async function bootstrapNginx() {
     }
 
     const networks = await docker.listNetworks();
-    const targetNetwork = networks.find(n => n.Name === 'backhaul' || n.Name.endsWith('_backhaul'));
-    const networkName = targetNetwork ? targetNetwork.Name : 'backhaul';
+    const targetNetwork = networks.find(n => n.Name === 'app-net' || n.Name.endsWith('_app-net'));
+    const networkName = targetNetwork ? targetNetwork.Name : 'app-net';
 
     const webProxyNetwork = networks.find(n => n.Name === 'web-proxy' || n.Name.endsWith('_web-proxy'));
     if (!webProxyNetwork) {

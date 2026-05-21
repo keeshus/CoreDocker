@@ -13,9 +13,10 @@ services:
       - ETCD_IMAGE=${ETCD_IMAGE:-gcr.io/etcd-development/etcd:v3.6.8}
       - NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.25.4-alpine}
       - ALPINE_IMAGE=${ALPINE_IMAGE:-alpine:3.19}
-      - DNS_PRODUCTION=false
+      - DNS_FORWARDER=${DNS_FORWARDER:-192.168.1.1}
       - NODE_DOMAIN=${NODE_DOMAIN:-node-1.local}
       - NODE_IP=${NODE_IP:-127.0.0.1}
+      - NODE_CLIENT_IP=${NODE_CLIENT_IP}
       - HOST_BACKUP_PATH=${HOST_BACKUP_PATH:-${PWD}/data/backup}
       - HOST_NONBACKUP_PATH=${HOST_NONBACKUP_PATH:-${PWD}/data/nonbackup}
       - NODE_ID=${NODE_ID}
@@ -27,7 +28,7 @@ services:
     group_add:
       - 986 # Host docker group GID
     networks:
-      - backhaul
+      - app-net
     restart: always
     # Hardening
     security_opt:
@@ -48,7 +49,7 @@ services:
     depends_on:
       - backend
     networks:
-      - backhaul
+      - app-net
     restart: always
     # Hardening
     security_opt:
@@ -63,5 +64,5 @@ services:
 networks:
   web-proxy:
     name: web-proxy
-  backhaul:
-    name: backhaul
+  app-net:
+    name: app-net

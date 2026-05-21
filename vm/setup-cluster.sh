@@ -17,6 +17,9 @@ NUM_NODES=3
 CLUSTER_NET_NAME="coredocker-cluster"
 CLUSTER_SUBNET="192.168.100.0/24"
 CLUSTER_GATEWAY="192.168.100.1"
+BACKHAUL_NET_NAME="coredocker-backhaul"
+BACKHAUL_SUBNET="10.100.0.0/24"
+BACKHAUL_GATEWAY="10.100.0.1"
 DOMAIN="coredocker.local"
 
 VM_MEMORY_MB=3072
@@ -32,11 +35,11 @@ SSH_KEY_PRIV="$SSH_KEY_DIR/cluster.key"
 SSH_KEY_PUB="$SSH_KEY_DIR/cluster.key.pub"
 TARBALL_PORT=9999
 
-# Node definitions: name:ip:mac:is_first
+# Node definitions: name:public_ip:backhaul_ip:public_mac:backhaul_mac:is_first
 NODES=(
-  "node-1|192.168.100.10|52:54:00:c0:de:01|true"
-  "node-2|192.168.100.11|52:54:00:c0:de:02|false"
-  "node-3|192.168.100.12|52:54:00:c0:de:03|false"
+  "node-1|192.168.100.10|10.100.0.10|52:54:00:c0:de:01|52:54:00:cd:fe:01|true"
+  "node-2|192.168.100.11|10.100.0.11|52:54:00:c0:de:02|52:54:00:cd:fe:02|false"
+  "node-3|192.168.100.12|10.100.0.12|52:54:00:c0:de:03|52:54:00:cd:fe:03|false"
 )
 
 # ════════════════════════════════════════════════════════
@@ -107,11 +110,26 @@ create_network() {
     else
       log "Network $CLUSTER_NET_NAME exists and is active."
     fi
-    return
+  else
+    log "Creating libvirt network $CLUSTER_NET_NAME..."
+    virsh net-define "$SCRIPT_DIR/network.xml"
+    virsh net-start "$CLUSTER_NET_NAME"
   fi
-  log "Creating libvirt network..."
-  virsh net-define "$SCRIPT_DIR/network.xml"
-  virsh net-start "$CLUSTER_NET_NAME"
+
+  # Backhaul network (isolated — no NAT, internal cluster traffic only)
+  if virsh net-info "$BACKHAUL_NET_NAME" &>/dev/null; then
+    local state; state="$(virsh net-info "$BACKHAUL_NET_NAME" | grep 'Active:' | awk '{print $2}')"
+    if [ "$state" = "no" ]; then
+      log "Starting existing network $BACKHAUL_NET_NAME..."
+      virsh net-start "$BACKHAUL_NET_NAME"
+    else
+      log "Network $BACKHAUL_NET_NAME exists and is active."
+    fi
+  else
+    log "Creating libvirt network $BACKHAUL_NET_NAME..."
+    virsh net-define "$SCRIPT_DIR/network-backhaul.xml"
+    virsh net-start "$BACKHAUL_NET_NAME"
+  fi
 }
 
 # ════════════════════════════════════════════════════════
@@ -161,7 +179,7 @@ PYEOF
 # 5. Generate cloud-init ISO for a node
 # ════════════════════════════════════════════════════════
 generate_cloud_init() {
-  local node_name="$1" node_ip="$2"
+  local node_name="$1" public_ip="$2" backhaul_ip="$3"
   local iso_dir="$SCRIPT_DIR/cloud-init-build/$node_name"
   local iso_file="$SCRIPT_DIR/cloud-init-build/${node_name}-seed.iso"
   mkdir -p "$iso_dir"
@@ -171,18 +189,17 @@ generate_cloud_init() {
   # meta-data
   printf 'instance-id: %s\nlocal-hostname: %s\n' "$node_name" "$node_name" > "$iso_dir/meta-data"
 
-  # network-config (static IP)
-  cat > "$iso_dir/network-config" <<'NETCFG'
+  # network-config (public + backhaul interfaces, matched by driver order)
+  cat > "$iso_dir/network-config" << NETCFG
 version: 2
 ethernets:
+  # Public interface (first NIC — 1Gb client network)
   id0:
     match:
       driver: virtio_net
     dhcp4: false
     addresses:
-NETCFG
-  printf '      - %s/24\n' "$node_ip" >> "$iso_dir/network-config"
-  cat >> "$iso_dir/network-config" <<NETCFG2
+      - ${public_ip}/24
     gateway4: ${CLUSTER_GATEWAY}
     nameservers:
       addresses:
@@ -190,7 +207,17 @@ NETCFG
         - 8.8.8.8
     search:
       - ${DOMAIN}
-NETCFG2
+  # Backhaul interface (second NIC — 2.5Gb cluster-internal network)
+  id1:
+    match:
+      driver: virtio_net
+    dhcp4: false
+    addresses:
+      - ${backhaul_ip}/24
+    nameservers:
+      search:
+        - backhaul.${DOMAIN}
+NETCFG
 
   # user-data — downloads repo from host and runs bootstrap
   cat > "$iso_dir/user-data" <<USERDATA
@@ -225,7 +252,7 @@ runcmd:
   - tar xzf /tmp/repo.tar.gz -C /opt/coredocker
   - chmod -R a+rX /opt/coredocker
   - rm /tmp/repo.tar.gz
-  - bash /opt/coredocker/vm/vm-bootstrap.sh '${node_name}' '${node_ip}' >/var/log/coredocker-bootstrap.log 2>&1
+  - bash /opt/coredocker/vm/vm-bootstrap.sh '${node_name}' '${public_ip}' '${backhaul_ip}' >/var/log/coredocker-bootstrap.log 2>&1
 USERDATA
 
   genisoimage -output "$iso_file" -volid cidata -joliet -rock \
@@ -237,7 +264,7 @@ USERDATA
 # 6. Create VM
 # ════════════════════════════════════════════════════════
 create_vm() {
-  local node_name="$1" node_ip="$2" node_mac="$3" seed_iso="$4"
+  local node_name="$1" node_ip="$2" node_mac="$3" backhaul_mac="$4" seed_iso="$5"
 
   # Check if VM already exists
   if virsh dominfo "$node_name" &>/dev/null; then
@@ -259,7 +286,7 @@ create_vm() {
     qemu-img create -f qcow2 -b "$CLOUD_IMAGE_FILE" -F qcow2 "$disk_file" "${VM_DISK_GB}G"
   fi
 
-  log "Launching $node_name ($node_ip)..."
+  log "Launching $node_name (public=$node_ip, backhaul=$backhaul_mac)..."
   virt-install \
     --connect qemu:///system \
     --name "$node_name" \
@@ -268,6 +295,7 @@ create_vm() {
     --disk "$disk_file,device=disk,bus=virtio" \
     --disk "$seed_iso,device=cdrom,bus=sata" \
     --network "network=${CLUSTER_NET_NAME},mac=${node_mac},model=virtio" \
+    --network "network=${BACKHAUL_NET_NAME},mac=${backhaul_mac},model=virtio" \
     --graphics none \
     --console pty \
     --serial pty \
@@ -324,11 +352,17 @@ destroy_cluster() {
       virsh undefine "$vm" 2>/dev/null || true
     fi
   done
-  if virsh net-info "$CLUSTER_NET_NAME" &>/dev/null; then
-    virsh net-destroy "$CLUSTER_NET_NAME" 2>/dev/null || true
-    virsh net-undefine "$CLUSTER_NET_NAME" 2>/dev/null || true
-  fi
+  for net in "$CLUSTER_NET_NAME" "$BACKHAUL_NET_NAME"; do
+    if virsh net-info "$net" &>/dev/null; then
+      virsh net-destroy "$net" 2>/dev/null || true
+      virsh net-undefine "$net" 2>/dev/null || true
+    fi
+  done
   rm -rf "$SCRIPT_DIR/disks" "$SCRIPT_DIR/cloud-init-build" "$SCRIPT_DIR/repo.tar.gz" "$SCRIPT_DIR/serve.py"
+  # Clear known_hosts so SSH doesn't complain about changed host keys on recreate
+  for ip in 192.168.100.10 192.168.100.11 192.168.100.12 10.100.0.10 10.100.0.11 10.100.0.12; do
+    ssh-keygen -f '/root/.ssh/known_hosts' -R "$ip" 2>/dev/null || true
+  done
   log "Clean slate ready."
 }
 
@@ -375,29 +409,29 @@ main() {
   rm -rf "$SCRIPT_DIR/cloud-init-build"
   local seed_isos=()
   for node_def in "${NODES[@]}"; do
-    IFS='|' read -r name ip mac is_first <<< "$node_def"
-    log "  $name ($ip)"
-    local iso; iso="$(generate_cloud_init "$name" "$ip")"
-    seed_isos+=("$iso|$name|$ip|$mac|$is_first")
+    IFS='|' read -r name ip bh_ip mac bh_mac is_first <<< "$node_def"
+    log "  $name (public=$ip, backhaul=$bh_ip)"
+    local iso; iso="$(generate_cloud_init "$name" "$ip" "$bh_ip")"
+    seed_isos+=("$iso|$name|$ip|$bh_ip|$mac|$bh_mac|$is_first")
   done
 
   # Phase 3: Launch VMs
   log "Phase 6/7: Launching VMs..."
   for entry in "${seed_isos[@]}"; do
-    IFS='|' read -r iso name ip mac is_first <<< "$entry"
-    create_vm "$name" "$ip" "$mac" "$iso"
+    IFS='|' read -r iso name ip bh_ip mac bh_mac is_first <<< "$entry"
+    create_vm "$name" "$ip" "$mac" "$bh_mac" "$iso"
   done
 
   # Phase 4: Wait for all VMs
   log "Phase 7/7: Waiting for VMs to boot and configure..."
   for entry in "${seed_isos[@]}"; do
-    IFS='|' read -r iso name ip mac is_first <<< "$entry"
+    IFS='|' read -r iso name ip bh_ip mac bh_mac is_first <<< "$entry"
     wait_for_vm "$ip" 300
   done
 
   # Wait for CoreDocker on each node
   for entry in "${seed_isos[@]}"; do
-    IFS='|' read -r iso name ip mac is_first <<< "$entry"
+    IFS='|' read -r iso name ip bh_ip mac bh_mac is_first <<< "$entry"
     wait_for_health "$ip" 180
   done
 
@@ -410,19 +444,19 @@ main() {
   echo "╚══════════════════════════════════════════╝"
   echo ""
   for entry in "${seed_isos[@]}"; do
-    IFS='|' read -r iso name ip mac is_first <<< "$entry"
+    IFS='|' read -r iso name ip bh_ip mac bh_mac is_first <<< "$entry"
     local role="node"
     [ "$is_first" = "true" ] && role="leader"
-    printf "  %-10s  ssh -i %s coredocker@%s  (http://%s)\n" \
-      "$name ($role)" "$SSH_KEY_PRIV" "$ip" "$ip"
+    printf "  %-10s  ssh -i %s coredocker@%s  (public=%s, backhaul=%s)\n" \
+      "$name ($role)" "$SSH_KEY_PRIV" "$ip" "$ip" "$bh_ip"
   done
   echo ""
 
   # Show cluster state
-  local nodes_json
-  nodes_json="$(curl -sf http://192.168.100.10:3000/api/nodes 2>/dev/null || echo '{"error":"not ready"}')"
-  echo "  Nodes registered in cluster:"
-  echo "  $nodes_json" | python3 -m json.tool 2>/dev/null || echo "  $nodes_json"
+  local status_json
+  status_json="$(curl -sf http://192.168.100.10/api/system/status 2>/dev/null || echo '{"error":"not ready"}')"
+  echo "  Node status:"
+  echo "  $status_json" | python3 -m json.tool 2>/dev/null || echo "  $status_json"
   echo ""
   log "Done!"
 }

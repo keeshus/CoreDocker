@@ -64,8 +64,9 @@ export const runOrchestrationLoop = async () => {
           // 4. Update DNS for CoreDNS (etcd plugin)
           if (container.config.proxy?.domain) {
             const dnsKey = `skydns/local/home/${container.name}`;
-            await etcd.put(dnsKey).value(JSON.stringify({ host: targetNode.ip }));
-            console.log(`[Orchestrator] Updated DNS: ${container.config.proxy.domain} -> ${targetNode.ip}`);
+            const dnsIp = targetNode.clientIp || targetNode.ip;
+            await etcd.put(dnsKey).value(JSON.stringify({ host: dnsIp }));
+            console.log(`[Orchestrator] Updated DNS: ${container.config.proxy.domain} -> ${dnsIp}`);
           }
         }
       }

@@ -3,6 +3,7 @@ import { getContainers, updateContainerDockerId, getNodes } from './db.js';
 import { addRoute } from './nginx.js';
 import { isNodeSealed } from './secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
+import { runEphemeralTask } from './ephemeral-tasks.js';
 import etcd from './db.js';
 import fs from 'fs';
 import path from 'path';
@@ -27,10 +28,10 @@ const ensureImage = async (image) => {
 const reconcileDNSVIP = async (localNodeId) => {
   try {
     const settingsStr = await etcd.get(SETTINGS_KEY).string().catch(() => null);
-    if (!settingsStr) return; // Database not ready or settings missing
-    
+    if (!settingsStr) return;
+
     const settings = JSON.parse(settingsStr);
-    
+
     if (!settings.dnsVip) return;
 
     let allNodes;
@@ -40,7 +41,7 @@ const reconcileDNSVIP = async (localNodeId) => {
       console.warn(`[Reconciler] Failed to fetch nodes for DNS VIP: ${nodeErr.message}`);
       return;
     }
-    
+
     const sortedNodes = allNodes.sort((a, b) => a.id.localeCompare(b.id));
     const nodeIndex = sortedNodes.findIndex(n => n.id === localNodeId);
 
@@ -55,12 +56,26 @@ const reconcileDNSVIP = async (localNodeId) => {
       return;
     }
 
+    // Determine the VRRP interface:
+    // 1. Use dnsVipInterface if explicitly set in settings
+    // 2. Auto-detect by matching the node's IP to a host interface
+    // 3. Fall back to 'eth0'
+    const localNode = sortedNodes[nodeIndex];
+    let vrrpInterface = settings.dnsVipInterface;
+    if (!vrrpInterface && localNode) {
+      vrrpInterface = await detectHostInterface(localNode.clientIp || localNode.ip);
+    }
+    if (!vrrpInterface) {
+      vrrpInterface = 'eth0';
+      console.log(`[Reconciler] Using default interface "eth0" for DNS VIP`);
+    }
+
     const priority = 100 - (nodeIndex * 10);
     const keepalivedPass = process.env.KEEPALIVED_PASSWORD || 'c0r3d0ck3r';
     const config = `
 vrrp_instance VI_DNS {
     state ${nodeIndex === 0 ? 'MASTER' : 'BACKUP'}
-    interface eth0
+    interface ${vrrpInterface}
     virtual_router_id 53
     priority ${priority}
     advert_int 1
@@ -88,7 +103,7 @@ vrrp_instance VI_DNS {
           Entrypoint: ['sh', '-c', 'apk add --no-cache keepalived && keepalived --dont-fork --log-console'],
           HostConfig: {
             CapAdd: ['NET_ADMIN', 'NET_BROADCAST'],
-            NetworkMode: 'backhaul',
+            NetworkMode: 'host',
             RestartPolicy: { Name: 'always' }
           }
         });
@@ -115,6 +130,11 @@ vrrp_instance VI_DNS {
 
 const reconcileCoreDNS = async (localNodeId) => {
   try {
+    // Read settings for DNS forwarder
+    const settingsStr = await etcd.get(SETTINGS_KEY).string().catch(() => null);
+    const settings = settingsStr ? JSON.parse(settingsStr) : {};
+    const dnsForwarder = settings.dnsForwarder || process.env.DNS_FORWARDER || '192.168.1.1';
+
     const containerName = 'core-docker-coredns';
     let container;
     
@@ -141,7 +161,7 @@ ${staticEntries}
         path /skydns
         endpoint ${process.env.ETCD_HOSTS || 'http://core-docker-etcd:2379'}
     }
-    forward . 192.168.1.1
+    forward . ${dnsForwarder}
     log
     errors
 }
@@ -178,8 +198,8 @@ ${staticEntries}
       await ensureImage(image);
 
       const isClusterSim = !!process.env.NODE_ID;
-      const dnsHostPort = isClusterSim ? (5300 + parseInt(localNodeId.replace(/\D/g, '') || 0)) : 5353;
-      const finalPort = process.env.DNS_PRODUCTION === 'true' ? '53' : dnsHostPort.toString();
+      const fallbackPort = isClusterSim ? (5300 + parseInt(localNodeId.replace(/\D/g, '') || 0)) : 5353;
+      const finalPort = process.env.DNS_PRODUCTION === 'false' ? fallbackPort.toString() : '53';
 
       console.log(`[Reconciler] CoreDNS binding to host port ${finalPort}`);
 
@@ -194,7 +214,7 @@ ${staticEntries}
             '53/tcp': [{ HostPort: finalPort }]
           },
           RestartPolicy: { Name: 'always' },
-          NetworkMode: 'backhaul'
+          NetworkMode: 'app-net'
         }
       });
 
@@ -204,7 +224,7 @@ ${staticEntries}
 
     // Clean up any stale/broken CoreDNS container before trying to reconcile.
     // The container may exist in "created" state with a stale network reference
-    // (e.g. after docker-compose down/up recreates the backhaul network).
+    // (e.g. after docker-compose down/up recreates the app-net network).
     try {
       const stale = docker.getContainer(containerName);
       const staleInspect = await stale.inspect();

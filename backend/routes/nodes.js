@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, ip } = req.body;
+    const { name, ip, clientIp } = req.body;
     if (!name || !ip) {
       return res.status(400).json({ error: 'Name and IP are required', code: 'VALIDATION_ERROR' });
     }

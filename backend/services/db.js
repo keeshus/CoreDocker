@@ -2,7 +2,7 @@ import { Etcd3 } from 'etcd3';
 import os from 'os';
 import { isNodeSealed, encrypt, decrypt } from './secrets.js';
 
-const etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379'];
+let etcdHosts = process.env.ETCD_HOSTS ? process.env.ETCD_HOSTS.split(',') : ['core-docker-etcd:2379'];
 const etcdUsername = process.env.ETCD_USERNAME || undefined;
 const etcdPassword = process.env.ETCD_PASSWORD || undefined;
 
@@ -72,6 +72,20 @@ export const recreateEtcdClient = () => {
   etcd = new Etcd3(etcdOptions);
 };
 
+/**
+ * Update the ETCD hosts list and reconnect the client at runtime.
+ * Used when a node joins a cluster and needs to point to the clustered etcd.
+ */
+export const updateEtcdHosts = (newHosts) => {
+  if (!newHosts || newHosts.length === 0) return;
+  const hostStr = Array.isArray(newHosts) ? newHosts.join(',') : newHosts;
+  process.env.ETCD_HOSTS = hostStr;
+  etcdHosts = hostStr.split(',');
+  etcdOptions.hosts = etcdHosts;
+  console.log(`[DB] Switching ETCD hosts to: ${hostStr}`);
+  recreateEtcdClient();
+};
+
 export const waitForEtcd = async (retries = 60, delay = 2000) => {
   const host = etcdHosts[0];
   console.log(`Connecting to ETCD at ${host}...`);
@@ -98,7 +112,7 @@ const GROUPS_PREFIX = 'core/groups/';
 
 let nodeLease = null;
 
-export const registerLocalNode = async (nodeId, name, ip) => {
+export const registerLocalNode = async (nodeId, name, ip, clientIp) => {
   if (nodeLease) {
     try {
       await nodeLease.revoke();
@@ -106,17 +120,18 @@ export const registerLocalNode = async (nodeId, name, ip) => {
       console.warn(`[DB] Failed to revoke previous lease for Node ${nodeId}: ${e.message}`);
     }
   }
-  
+
   nodeLease = etcd.lease(10); // 10 second TTL
   nodeLease.on('lost', () => {
     console.error('Node lease lost, re-registering...');
-    registerLocalNode(nodeId, name, ip);
+    registerLocalNode(nodeId, name, ip, clientIp);
   });
 
   const node = {
     id: nodeId,
     name,
     ip,
+    clientIp: clientIp || ip,
     status: 'online',
     sealed: isNodeSealed(),
     lastSeen: Date.now(),
@@ -140,11 +155,12 @@ export const getNodes = async () => {
   }
 };
 
-export const saveNode = async (id, name, ip, status = 'offline') => {
+export const saveNode = async (id, name, ip, status = 'offline', clientIp) => {
   const node = {
     id,
     name,
     ip,
+    clientIp: clientIp || ip,
     status,
     backupPath: process.env.HOST_BACKUP_PATH || '/data/backup',
     nonBackupPath: process.env.HOST_NONBACKUP_PATH || '/data/non-backup'
@@ -168,8 +184,8 @@ export const getLocalNodeConfig = async () => {
     }
   }
 
-  // Find node by IP
-  let localNode = nodes.find(n => localIps.includes(n.ip));
+  // Find node by IP (match either backhaul or client IP)
+  let localNode = nodes.find(n => localIps.includes(n.ip) || (n.clientIp && localIps.includes(n.clientIp)));
   
   // If not found, check if we have system-wide defaults
   if (!localNode) {

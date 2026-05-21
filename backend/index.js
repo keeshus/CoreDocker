@@ -14,8 +14,8 @@ import taskRoutes from './routes/tasks.js';
 import settingsRoutes from './routes/settings.js';
 import groupRoutes from './routes/groups.js';
 import {reconcileContainers, startReconciler, stopReconciler} from './services/reconciler.js';
-import {bootstrapEtcd, addEtcdMember} from './services/etcd-cluster.js';
-import {closeEtcd, registerLocalNode, waitForEtcd, saveNode} from './services/db.js';
+import {bootstrapEtcd, addEtcdMember, migrateToCluster, clearClusterConfig} from './services/etcd-cluster.js';
+import {closeEtcd, registerLocalNode, waitForEtcd, saveNode, updateEtcdHosts} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import {bootstrapNginx, getNodeUrl} from './services/nginx.js';
@@ -46,6 +46,7 @@ let JWT_SECRET = null;
 const nodeId = process.env.NODE_ID || uuidv4();
 const nodeName = process.env.NODE_NAME || 'node-1';
 const nodeIp = process.env.NODE_IP || '127.0.0.1';
+const clientIp = process.env.NODE_CLIENT_IP || nodeIp;
 let clusterBooted = false;
 
 app.use(helmet());
@@ -214,7 +215,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
 
     if (mode === 'create' || !mode) {
       await initializeSystem(password);
-      await registerLocalNode(nodeId, nodeName, nodeIp);
+      await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
       await bootCluster(nodeId);
     } else if (mode === 'join') {
       const joinRes = await fetch(`${getNodeUrl(primaryIp)}/api/system/join`, {
@@ -223,7 +224,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${joinToken}`,
         },
-        body: JSON.stringify({ name: nodeName, ip: nodeIp }),
+        body: JSON.stringify({ name: nodeName, ip: nodeIp, clientIp }),
       });
       if (!joinRes.ok) {
         throw new Error('Failed to join cluster: ' + await joinRes.text());
@@ -231,20 +232,40 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
 
       const joinData = await joinRes.json();
 
-      return res.json({ success: true, joined: true, data: joinData });
+      if (!joinData.clusterConfig) {
+        // Legacy leader — no cluster config returned, fall through
+        return res.json({ success: true, joined: true, data: joinData });
+      }
+
+      // Migrate local etcd from standalone to clustered
+      console.log('[Cluster] Migrating etcd to cluster mode...');
+      await migrateToCluster(joinData.clusterConfig);
+
+      // Update ETCD hosts to point to all cluster members
+      if (joinData.clusterConfig.memberClientUrls && joinData.clusterConfig.memberClientUrls.length > 0) {
+        updateEtcdHosts(joinData.clusterConfig.memberClientUrls);
+      }
+
+      // Wait for clustered etcd to become reachable
+      console.log('[Cluster] Waiting for clustered ETCD...');
+      await waitForEtcd(30, 2000);
+
+      // Register this node with the clustered etcd
+      await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
+      await bootCluster(nodeId);
     } else if (mode === 'restore') {
       const snapshotFile = req.file;
       if (!snapshotFile) throw new Error('Missing snapshot file');
 
       await restoreSystem(snapshotFile.path, password);
-      await registerLocalNode(nodeId, nodeName, nodeIp);
+      await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
       await bootCluster(nodeId);
 
       await performPostRestoreMigration();
     }
 
     const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
-    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    res.cookie('token', token, { httpOnly: true, secure: req.secure, sameSite: 'strict' });
 
     res.json({ success: true });
   } catch (e) {
@@ -259,14 +280,30 @@ app.post('/api/system/join', async (req, res) => {
       return res.status(401).json({ error: 'Missing or invalid join token', code: 'AUTH_REQUIRED' });
     }
 
-    const { name, ip } = req.body;
+    const { name, ip, clientIp: joinClientIp } = req.body;
 
-    const etcdRes = await addEtcdMember(name, ip);
+    const clusterInfo = await addEtcdMember(name, ip);
 
     const id = uuidv4();
-    await saveNode(id, name, ip, 'online');
+    await saveNode(id, name, ip, 'online', joinClientIp);
 
-    res.json({ success: true, etcdRes, id });
+    // Ensure the joining node's client URL is in the list
+    const selfClientUrl = `http://${ip}:2379`;
+    const allUrls = clusterInfo.allClientUrls || [];
+    if (!allUrls.find(u => u.includes(ip))) {
+      allUrls.push(selfClientUrl);
+    }
+
+    res.json({
+      success: true,
+      id,
+      clusterConfig: {
+        memberName: clusterInfo.memberName,
+        initialCluster: clusterInfo.initialCluster,
+        initialClusterState: clusterInfo.initialClusterState,
+        memberClientUrls: allUrls,
+      },
+    });
   } catch (e) {
     res.status(400).json({ error: e.message, code: 'JOIN_FAILED' });
   }
@@ -285,7 +322,7 @@ app.post('/api/system/unseal', async (req, res) => {
     await bootCluster(nodeId);
 
     const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
-    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    res.cookie('token', token, { httpOnly: true, secure: req.secure, sameSite: 'strict' });
 
     res.json({ success: true });
   } catch (e) {
@@ -335,7 +372,7 @@ const stopSystemContainers = async () => {
 
     const networks = await docker.listNetworks();
     for (const n of networks) {
-      // Only clean up dynamically-created networks. backhaul is managed
+      // Only clean up dynamically-created networks. app-net is managed
       // by docker-compose and will be removed when the stack goes down.
       if (n.Name === 'web-proxy' || n.Name.startsWith('group-')) {
         console.log(`Cleaning up network ${n.Name}...`);
