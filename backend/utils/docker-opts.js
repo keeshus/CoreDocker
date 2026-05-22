@@ -3,6 +3,7 @@ import { getSecret } from '../services/secrets.js';
 
 const VALID_RESTART_POLICIES = ['no', 'always', 'unless-stopped', 'on-failure'];
 const IMAGE_NAME_RE = /^[a-zA-Z0-9._\-\/]+(:[a-zA-Z0-9._-]+)?$/;
+const BLOCKLISTED_DEVICES = ['/dev/sda', '/dev/sda1', '/dev/sdb', '/dev/mem', '/dev/kmem', '/dev/port'];
 
 export const buildCreateOpts = async (name, image, env, volumes, ports, restartPolicy, resources, opts = {}) => {
   if (!IMAGE_NAME_RE.test(image)) {
@@ -98,6 +99,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
       const [pathOnHost, pathInContainer, cgroupPermissions] = d.trim().split(':');
       if (!pathOnHost) return null;
       if (!pathOnHost.startsWith('/')) return null;
+      if (BLOCKLISTED_DEVICES.includes(pathOnHost)) return null;
       return {
         PathOnHost: pathOnHost,
         PathInContainer: pathInContainer || pathOnHost,

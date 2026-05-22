@@ -12,5 +12,6 @@ mkdir -p /mnt/backup/__system__/etcd/config
 mkdir -p /mnt/backup/__system__/etcd-data
 mkdir -p /mnt/non-backup
 
-# Run the application (no privilege drop needed for rootless Docker compat)
-exec "$@"
+# Run the application (drop privileges after creating directories)
+chown -R nodejs:nodejs /mnt/backup /mnt/non-backup
+exec su -s /bin/sh nodejs -c "exec node backend/index.js"

@@ -1,5 +1,6 @@
 import docker from './docker.js';
 import { SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -209,6 +210,8 @@ export const bootstrapEtcd = async () => {
       ? `http://${advertiseIp}:2380`
       : `http://${CONTAINER_NAME}:2380`;
 
+    const clusterToken = crypto.randomBytes(16).toString('hex');
+
     cmd = [
       'etcd',
       '--name', etcdName,
@@ -217,7 +220,7 @@ export const bootstrapEtcd = async () => {
       '--listen-peer-urls', 'http://0.0.0.0:2380',
       '--initial-advertise-peer-urls', peerUrl,
       '--initial-cluster', `${etcdName}=${peerUrl}`,
-      '--initial-cluster-token', 'core-docker-cluster',
+      '--initial-cluster-token', clusterToken,
       '--initial-cluster-state', 'new',
       '--data-dir', '/etcd-data',
       '--logger', 'zap',
@@ -258,6 +261,70 @@ export const bootstrapEtcd = async () => {
     const newContainer = await docker.createContainer(createOpts);
     await newContainer.start();
     console.log('[ETCD] Container created and started.');
+
+    // Enable etcd authentication on first bootstrap (not on restart from config)
+    if (!clusterConfig) {
+      const rootUser = crypto.randomBytes(16).toString('hex');
+      const rootPass = crypto.randomBytes(32).toString('hex');
+
+      // Wait for etcd to be ready, then set up auth
+      for (let i = 0; i < 10; i++) {
+        try {
+          const addExec = await newContainer.exec({
+            Cmd: ['etcdctl', 'user', 'add', `root:${rootPass}`],
+            AttachStdout: true, AttachStderr: true,
+          });
+          const addResult = await new Promise((resolve) => {
+            addExec.start(async (err, stream) => {
+              if (err) { resolve(false); return; }
+              let data = '';
+              stream.on('data', c => data += c.toString());
+              stream.on('end', async () => {
+                const insp = await addExec.inspect();
+                resolve(insp.ExitCode === 0);
+              });
+            });
+          });
+          if (!addResult) { await new Promise(r => setTimeout(r, 1000)); continue; }
+
+          const enableExec = await newContainer.exec({
+            Cmd: ['etcdctl', 'auth', 'enable'],
+            AttachStdout: true, AttachStderr: true,
+          });
+          await new Promise((resolve) => {
+            enableExec.start(async (err, stream) => {
+              if (err) { resolve(false); return; }
+              stream.on('end', async () => {
+                const insp = await enableExec.inspect();
+                resolve(insp.ExitCode === 0);
+              });
+            });
+          });
+
+          // Save credentials
+          const authPath = `${process.env.HOST_BACKUP_PATH || '/data/backup'}/${SYSTEM_NAMESPACE}/etcd/auth.json`;
+          const dir = path.dirname(authPath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(authPath, JSON.stringify({ username: rootUser, password: rootPass }, null, 2));
+          console.log('[ETCD] Authentication enabled.');
+          break;
+        } catch (e) {
+          console.log(`[ETCD] Waiting for etcd readiness (auth setup)... ${e.message}`);
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    }
+
+    // Save cluster config for standalone bootstrap so subsequent restarts
+    // and joining nodes can read the generated cluster token.
+    if (!clusterConfig) {
+      const selfIp = advertiseIp || '127.0.0.1';
+      writeClusterConfig({
+        clusterToken,
+        members: [{ name: etcdName, ip: selfIp }],
+      });
+    }
+
     return true;
   } catch (err) {
     console.error('[ETCD] Failed to create container:', err.message);
@@ -335,11 +402,28 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
       console.warn(`[ETCD] Failed to parse member list: ${e.message}`);
     }
 
+    const clusterConfig = readClusterConfig();
+
+    // Read etcd auth credentials to share with joining nodes
+    let authCreds;
+    try {
+      const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
+      const authFile = path.join(backupPath, `${SYSTEM_NAMESPACE}/etcd/auth.json`);
+      if (fs.existsSync(authFile)) {
+        authCreds = JSON.parse(fs.readFileSync(authFile, 'utf8'));
+      }
+    } catch (e) {
+      console.warn(`[ETCD] Failed to read auth credentials: ${e.message}`);
+    }
+
     return {
       memberName: parsed.name || nodeName,
       initialCluster: parsed.initialCluster,
       initialClusterState: parsed.initialClusterState || 'existing',
       allClientUrls,
+      clusterToken: clusterConfig ? clusterConfig.clusterToken : undefined,
+      authUsername: authCreds?.username,
+      authPassword: authCreds?.password,
     };
   } catch (error) {
     console.error(`Failed to add ETCD member ${nodeName}:`, error);
@@ -411,7 +495,7 @@ export const migrateToCluster = async (clusterInfo) => {
     '--initial-advertise-peer-urls', `http://${selfIp}:2380`,
     '--initial-cluster', initialCluster,
     '--initial-cluster-state', initialClusterState,
-    '--initial-cluster-token', 'core-docker-cluster',
+    '--initial-cluster-token', clusterInfo.clusterToken || 'core-docker-cluster',
     '--data-dir', '/etcd-data',
     '--logger', 'zap',
     '--log-outputs', 'stderr',
@@ -465,7 +549,7 @@ export const migrateToCluster = async (clusterInfo) => {
   }
 
   writeClusterConfig({
-    clusterToken: 'core-docker-cluster',
+    clusterToken: clusterInfo.clusterToken || 'core-docker-cluster',
     members: memberIps,
   });
 

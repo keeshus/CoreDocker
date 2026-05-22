@@ -6,7 +6,42 @@ import { getNodeUrl } from '../services/nginx.js';
 
 const router = express.Router();
 
+// Track active SSE connections per client IP
+const connectionsByIp = new Map();
+const MAX_CONNECTIONS_PER_IP = 5;
+// Track remote proxy connections per target node (max 1 per node)
+const remoteProxyTargets = new Set();
+
+function trackConnection(ip, res) {
+  let conns = connectionsByIp.get(ip);
+  if (!conns) {
+    conns = new Set();
+    connectionsByIp.set(ip, conns);
+  }
+  conns.add(res);
+}
+
+function untrackConnection(ip, res) {
+  const conns = connectionsByIp.get(ip);
+  if (!conns) return;
+  conns.delete(res);
+  if (conns.size === 0) connectionsByIp.delete(ip);
+}
+
 router.get('/', async (req, res) => {
+  const clientIp = req.ip;
+
+  // Enforce max concurrent connections per client IP
+  const existing = connectionsByIp.get(clientIp);
+  if (existing && existing.size >= MAX_CONNECTIONS_PER_IP) {
+    return res.status(429).json({ error: 'Too many concurrent event connections', code: 'SSE_LIMIT' });
+  }
+
+  // Enforce max 1 remote proxy connection per target node
+  if (req.clusterNode && remoteProxyTargets.has(clientIp)) {
+    return res.status(429).json({ error: 'Remote proxy already connected for this node', code: 'SSE_PROXY_LIMIT' });
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -18,6 +53,10 @@ router.get('/', async (req, res) => {
   };
 
   sendEvent({ type: 'connected' });
+
+  // Track this connection
+  trackConnection(clientIp, res);
+  if (req.clusterNode) remoteProxyTargets.add(clientIp);
 
   const statsStreams = new Map();
   const remoteReaders = [];
@@ -92,6 +131,8 @@ router.get('/', async (req, res) => {
       statsStreams.forEach(s => s.destroy && s.destroy());
       statsStreams.clear();
       remoteReaders.forEach(r => r.cancel && r.cancel());
+      untrackConnection(clientIp, res);
+      if (req.clusterNode) remoteProxyTargets.delete(clientIp);
     });
   });
 });

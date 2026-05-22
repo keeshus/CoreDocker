@@ -80,11 +80,20 @@ export function filterContainersByNode(containers, selectedNode) {
   });
 }
 
+export function validatePasswordStrength(password) {
+  if (password.length < 12) return { valid: false, error: 'Password must be at least 12 characters long' };
+  if (!/[A-Z]/.test(password)) return { valid: false, error: 'Password must include an uppercase letter' };
+  if (!/[a-z]/.test(password)) return { valid: false, error: 'Password must include a lowercase letter' };
+  if (!/[0-9]/.test(password)) return { valid: false, error: 'Password must include a digit' };
+  if (!/[^A-Za-z0-9]/.test(password)) return { valid: false, error: 'Password must include a special character' };
+  return { valid: true };
+}
+
 export function validatePasswordChange(passwords) {
   if (passwords.next !== passwords.confirm) {
     return { valid: false, error: "New passwords don't match!" };
   }
-  return { valid: true };
+  return validatePasswordStrength(passwords.next);
 }
 
 export function parseHaAllowedNodes(input) {

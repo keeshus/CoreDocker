@@ -1,6 +1,9 @@
 import etcd from './db.js';
 import { runEphemeralTask, SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
 import { logEvent, purgeOldLogs } from './logger.js';
+import { getSecret } from './secrets.js';
+import fs from 'fs';
+import path from 'path';
 
 const TASKS_PREFIX = 'tasks/';
 const LOCKS_PREFIX = 'locks/';
@@ -133,7 +136,7 @@ export const runTask = async (taskId) => {
       if (taskId === 'restic-backup') {
         taskResult = await runEphemeralTask('restic/restic', ['backup', '/data/backup']);
       } else if (taskId === 'certbot-renew') {
-        taskResult = await runEphemeralTask('certbot/certbot', ['renew']);
+        taskResult = await runCertbotRenew();
       } else if (taskId === 'ha-folder-sync') {
         taskResult = await performHASync();
       } else if (taskId === 'purge-old-logs') {
@@ -238,6 +241,111 @@ async function performHASync() {
   }
 
   return { stdout: summary, exitCode: 0 };
+}
+
+async function runCertbotRenew() {
+  const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
+  const sslDir = path.join(backupPath, SYSTEM_NAMESPACE, 'nginx', 'ssl', 'host');
+  const fullchainPath = path.join(sslDir, 'fullchain.pem');
+  const credsPath = path.join(backupPath, SYSTEM_NAMESPACE, 'cloudflare.creds');
+
+  // Read Cloudflare DNS-01 credentials from cluster secrets
+  let domain, cfToken;
+  try {
+    domain = await getSecret('cert-domain');
+    cfToken = await getSecret('cert-cloudflare-token');
+  } catch (e) {
+    return { stdout: `Failed to read cert secrets: ${e.message}`, exitCode: 1 };
+  }
+
+  if (!domain || !cfToken) {
+    logEvent('scheduler', 'warn', 'Certbot: cert-domain or cert-cloudflare-token not configured. Skipping renewal.');
+    return { stdout: 'Cloudflare credentials not configured. Set cert-domain and cert-cloudflare-token secrets.', exitCode: 0 };
+  }
+
+  // Write Cloudflare credentials file
+  try {
+    if (!fs.existsSync(path.dirname(credsPath))) fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+    fs.writeFileSync(credsPath, `dns_cloudflare_api_token = ${cfToken}\n`);
+  } catch (e) {
+    return { stdout: `Failed to write Cloudflare creds: ${e.message}`, exitCode: 1 };
+  }
+
+  // Determine if this is a first-time issue or renewal
+  const isFirstRun = !fs.existsSync(fullchainPath);
+
+  // Build certbot command
+  const email = `admin@${domain.replace(/^\*\./, '')}`;
+  const deployHook = `cp /etc/letsencrypt/live/core-docker/fullchain.pem /ssl/ && cp /etc/letsencrypt/live/core-docker/privkey.pem /ssl/`;
+
+  let cmd;
+  if (isFirstRun) {
+    cmd = [
+      'certbot', 'certonly', '--dns-cloudflare',
+      '--dns-cloudflare-credentials', '/creds.ini',
+      '--non-interactive', '--agree-tos',
+      '--email', email,
+      '-d', domain,
+      '-d', `*.${domain.replace(/^\*\./, '')}`,
+      '--cert-name', 'core-docker',
+      '--deploy-hook', deployHook,
+    ];
+    logEvent('scheduler', 'info', `Certbot: Requesting first certificate for ${domain}`);
+  } else {
+    cmd = [
+      'certbot', 'renew', '--dns-cloudflare',
+      '--dns-cloudflare-credentials', '/creds.ini',
+      '--non-interactive',
+      '--cert-name', 'core-docker',
+      '--deploy-hook', deployHook,
+    ];
+    logEvent('scheduler', 'info', 'Certbot: Running renewal check');
+  }
+
+  // Run certbot in an ephemeral container. The backup mount gives access to
+  // cloudflare.creds (via /data/backup/__system__/) and the SSL output directory
+  // (via /data/backup/__system__/nginx/ssl/host/ → mounted at /ssl/).
+  try {
+    const result = await runEphemeralTask('certbot/dns-cloudflare', cmd, {
+      HostConfig: {
+        Binds: [
+          `${sslDir}:/ssl`,
+          `${credsPath}:/creds.ini:ro`,
+        ],
+      },
+    });
+
+    if (result.exitCode === 0) {
+      logEvent('scheduler', 'info', `Certbot: Certificate for ${domain} updated successfully`);
+
+      // Reload nginx to pick up new certs
+      try {
+        const docker = (await import('./docker.js')).default;
+        const containers = await docker.listContainers({ filters: { name: ['^/core-docker-proxy$'] } });
+        if (containers.length > 0) {
+          const nginxContainer = docker.getContainer(containers[0].Id);
+          const exec = await nginxContainer.exec({
+            Cmd: ['nginx', '-s', 'reload'],
+            AttachStdout: true, AttachStderr: true,
+          });
+          await exec.start();
+        }
+      } catch (e) {
+        logEvent('scheduler', 'warn', `Certbot: Failed to reload nginx: ${e.message}`);
+      }
+
+      return { stdout: `Certificate for ${domain} updated`, exitCode: 0 };
+    }
+
+    logEvent('scheduler', 'error', `Certbot: Command failed with exit code ${result.exitCode}`);
+    return { stdout: `Certbot command failed: ${result.stdout || 'no output'}`, exitCode: result.exitCode };
+  } catch (e) {
+    logEvent('scheduler', 'error', `Certbot: Task failed: ${e.message}`);
+    return { stdout: `Certbot task error: ${e.message}`, exitCode: 1 };
+  } finally {
+    // Clean up credentials file
+    try { fs.unlinkSync(credsPath); } catch {}
+  }
 }
 
 let schedulerInterval = null;

@@ -7,27 +7,10 @@ const NGINX_CONF_DIR = `${SYSTEM_NAMESPACE}/nginx/conf.d`;
 const NGINX_LOCATIONS_DIR = `${SYSTEM_NAMESPACE}/nginx/conf.d/locations`;
 const NGINX_SSL_DIR = `${SYSTEM_NAMESPACE}/nginx/ssl`;
 
-// Determined during bootstrapNginx — used by cross-node API calls
-let publicProtocol = 'http';
-let publicPort = 80;
-
+// Always HTTPS — self-signed certs generated as fallback, overwritten
+// by real certs (e.g. certbot) when available.
 export function getNodeUrl(nodeIp) {
-  return `${publicProtocol}://${nodeIp}:${publicPort}`;
-}
-
-async function detectPublicEndpoint() {
-    const hostCertPath = '/etc/certs';
-    const certsExist = await runEphemeralTask('alpine', ['ls', `${hostCertPath}/fullchain.pem`], {
-        HostConfig: { Binds: [`${hostCertPath}:${hostCertPath}:ro`] }
-    }).then(res => res.exitCode === 0).catch(() => false);
-
-    if (certsExist) {
-        publicProtocol = 'https';
-        publicPort = 443;
-    } else {
-        publicProtocol = 'http';
-        publicPort = 80;
-    }
+  return `https://${nodeIp}:443`;
 }
 
 export async function addRoute(containerName, uri, port, domain = null, sslCert = null, sslKey = null) {
@@ -145,9 +128,6 @@ export async function bootstrapNginx() {
     const CONTAINER_NAME = 'core-docker-proxy';
     const NGINX_IMAGE = process.env.NGINX_IMAGE || 'nginx:latest';
 
-    // Determine public endpoint before any early return
-    await detectPublicEndpoint();
-
     // Remove stale container if it exists (from a previous failed bootstrap)
     try {
         const container = docker.getContainer(CONTAINER_NAME);
@@ -177,28 +157,25 @@ export async function bootstrapNginx() {
             docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
         });
     }
-    
+
+    // Always generate self-signed certs as fallback for HTTPS.
+    // Real certs (e.g. from certbot) can overwrite these at the same path.
+    const selfSignedPath = `${backupPath}/${SYSTEM_NAMESPACE}/nginx/ssl/host`;
+    logEvent('nginx', 'info', 'Generating self-signed certificate for HTTPS...');
+    await runEphemeralTask('alpine', [
+        'sh', '-c',
+        `apk add --no-cache openssl && \
+         mkdir -p ${selfSignedPath} && \
+         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+         -keyout ${selfSignedPath}/privkey.pem \
+         -out ${selfSignedPath}/fullchain.pem \
+         -subj "/CN=${nodeName}.local"`
+    ]);
+
     const binds = [
         `${backupPath}/${SYSTEM_NAMESPACE}/nginx/conf.d:/etc/nginx/conf.d`,
         `${backupPath}/${SYSTEM_NAMESPACE}/nginx/ssl:/etc/nginx/ssl`
     ];
-
-    if (publicProtocol === 'https') {
-        binds.push('/etc/certs:/etc/nginx/ssl/host:ro');
-    } else {
-        logEvent('nginx', 'warn', 'No host certificates found, generating self-signed...');
-        const selfSignedPath = `${backupPath}/${SYSTEM_NAMESPACE}/nginx/ssl/host`;
-        await runEphemeralTask('alpine', [
-            'sh', '-c',
-            `apk add --no-cache openssl && \
-             mkdir -p ${selfSignedPath} && \
-             openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-             -keyout ${selfSignedPath}/privkey.pem \
-             -out ${selfSignedPath}/fullchain.pem \
-             -subj "/CN=${nodeName}.local"`
-        ]);
-        binds.push(`${selfSignedPath}:/etc/nginx/ssl/host:ro`);
-    }
 
     const networks = await docker.listNetworks();
     const targetNetwork = networks.find(n => n.Name === 'app-net' || n.Name.endsWith('_app-net'));
@@ -211,13 +188,19 @@ export async function bootstrapNginx() {
     }
     const webProxyName = 'web-proxy';
 
-    // Write default nginx config that proxies / to the frontend
-    // and includes dynamically added location blocks.
-    // Uses resolver + variable to defer DNS resolution to runtime,
-    // so nginx starts even if the frontend container isn't resolvable yet.
+    // Default nginx config: redirect HTTP to HTTPS, then serve HTTPS with
+    // self-signed (or real) certs from the host SSL directory.
+    // Includes dynamically added location blocks for container routes.
     const defaultConfContent = `
 server {
     listen 80;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    ssl_certificate /etc/nginx/ssl/host/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/host/privkey.pem;
 
     resolver 127.0.0.11 valid=30s;
 

@@ -231,6 +231,11 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                         />
                         Secret
                       </label>
+                      {e.isSecret && (
+                        <div style={{ fontSize: '0.75em', color: '#dc2626', marginTop: '4px', gridColumn: '1 / -1' }}>
+                          Warning: Secret values are injected as plaintext env vars and visible via <code>docker inspect</code>
+                        </div>
+                      )}
 
                       <button type="button" onClick={() => removeArrayItem('env', i)} style={{ padding: '4px 8px' }}>X</button>
                     </div>

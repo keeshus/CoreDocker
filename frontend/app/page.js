@@ -54,6 +54,15 @@ function HomeInner() {
   useEffect(() => {
     refreshData().finally(() => setLoading(false));
 
+    // Auto-refresh the session token every 4 hours (half of 8h expiry)
+    const sessionRefreshInterval = setInterval(async () => {
+      try {
+        await fetch('/api/system/session/refresh', { method: 'POST' });
+      } catch (e) {
+        console.error('Session refresh failed:', e);
+      }
+    }, 4 * 60 * 60 * 1000);
+
     const eventSource = new EventSource('/api/events');
     eventSource.onmessage = (event) => {
       try {
@@ -71,7 +80,10 @@ function HomeInner() {
       } catch (e) {}
     };
     eventSource.onerror = () => eventSource.close();
-    return () => eventSource.close();
+    return () => {
+      eventSource.close();
+      clearInterval(sessionRefreshInterval);
+    };
   }, []);
 
   useEffect(() => {

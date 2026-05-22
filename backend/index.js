@@ -15,11 +15,11 @@ import settingsRoutes from './routes/settings.js';
 import groupRoutes from './routes/groups.js';
 import {reconcileContainers, startReconciler, stopReconciler} from './services/reconciler.js';
 import {bootstrapEtcd, addEtcdMember, migrateToCluster, clearClusterConfig} from './services/etcd-cluster.js';
-import {closeEtcd, registerLocalNode, waitForEtcd, saveNode, updateEtcdHosts} from './services/db.js';
+import {closeEtcd, registerLocalNode, waitForEtcd, saveNode, updateEtcdHosts, reconnectEtcd} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import {bootstrapNginx, getNodeUrl} from './services/nginx.js';
-import {startLogger} from './services/logger.js';
+import {startLogger, logEvent} from './services/logger.js';
 import docker from './services/docker.js';
 import {runMigrations} from './services/migrations.js';
 import migrations from './migrations/index.js';
@@ -35,6 +35,7 @@ import {
   getOrCreateJwtSecret,
   getJwtSecret,
 } from './services/secrets.js';
+import { isTokenBlacklisted, refreshToken, signToken, revokeAllSessions, checkSessionGeneration } from './services/session.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -50,12 +51,23 @@ const nodeIp = process.env.NODE_IP || '127.0.0.1';
 const clientIp = process.env.NODE_CLIENT_IP || nodeIp;
 let clusterBooted = false;
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:"],
+      connectSrc: ["'self'", "ws:"],
+      fontSrc: ["'self'"],
+    },
+  },
+}));
 app.use(cookieParser());
 app.use(express.json());
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || true,
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
 }));
 
@@ -78,6 +90,44 @@ const generalLimiter = rateLimit({
 app.use('/api/system', authLimiter);
 
 app.use('/api', generalLimiter);
+
+// Brute force protection — tracks failed auth attempts per IP in etcd.
+// After 5 failures the IP is locked out for 2^failures minutes (max 24h).
+const BRUTE_KEY_PREFIX = 'system/brute/';
+const BRUTE_MAX_FAILURES = 5;
+const BRUTE_LOCKOUT_CAP_MIN = 1440; // 24h
+
+async function checkBruteForce(ip) {
+  try {
+    const raw = await etcd.get(`${BRUTE_KEY_PREFIX}${ip}`).string();
+    if (!raw) return null;
+    const { count, lastAttempt } = JSON.parse(raw);
+    const lockoutMin = Math.min(Math.pow(2, count), BRUTE_LOCKOUT_CAP_MIN);
+    const elapsed = (Date.now() - lastAttempt) / 60000;
+    if (elapsed < lockoutMin) {
+      return { locked: true, remainingMin: Math.ceil(lockoutMin - elapsed), count };
+    }
+    return { locked: false, count };
+  } catch { return null; }
+}
+
+async function recordFailedAttempt(ip) {
+  try {
+    const raw = await etcd.get(`${BRUTE_KEY_PREFIX}${ip}`).string();
+    const entry = raw ? JSON.parse(raw) : { count: 0, lastAttempt: 0 };
+    entry.count += 1;
+    entry.lastAttempt = Date.now();
+    const ttl = Math.min(Math.pow(2, entry.count), BRUTE_LOCKOUT_CAP_MIN) * 60;
+    await etcd.put(`${BRUTE_KEY_PREFIX}${ip}`).value(JSON.stringify(entry));
+    // Set TTL so the lockout record auto-clears
+    const lease = etcd.lease(ttl);
+    await lease.put(`${BRUTE_KEY_PREFIX}${ip}`).value(JSON.stringify(entry));
+  } catch (e) { console.error('[BruteForce] Failed to record attempt:', e.message); }
+}
+
+async function clearBruteForce(ip) {
+  try { await etcd.delete().key(`${BRUTE_KEY_PREFIX}${ip}`); } catch {}
+}
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -114,7 +164,7 @@ const bootCluster = async (nodeId) => {
   }
 };
 
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   if (!JWT_SECRET) {
     return res.status(503).json({ error: 'JWT secret not yet initialized', code: 'SERVICE_NOT_READY' });
   }
@@ -134,6 +184,14 @@ const requireAuth = (req, res, next) => {
 
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+    if (req.user.jti && await isTokenBlacklisted(req.user.jti)) {
+      res.clearCookie('token');
+      return res.status(401).json({ error: 'Session has been revoked', code: 'SESSION_REVOKED' });
+    }
+    if (!await checkSessionGeneration(req.user)) {
+      res.clearCookie('token');
+      return res.status(401).json({ error: 'Session generation expired (password changed or node re-unsealed)', code: 'SESSION_GEN_EXPIRED' });
+    }
     next();
   } catch (err) {
     res.status(401).json({ error: 'Invalid or expired session', code: 'INVALID_TOKEN' });
@@ -197,6 +255,21 @@ async function restoreSystem(snapshotPath, password) {
   console.log('Restoring from snapshot:', snapshotPath);
   const fs = await import('fs');
   const snapshotData = fs.readFileSync(snapshotPath);
+
+  // Validate snapshot: etcd v3 snapshots are binary protobuf, not plaintext.
+  // Check first 8 bytes are not all ASCII printable (would indicate HTML/JSON/text).
+  if (snapshotData.length < 64) {
+    throw new Error('Snapshot file is too small to be a valid etcd backup');
+  }
+  const head = snapshotData.subarray(0, 8);
+  let printableCount = 0;
+  for (const b of head) {
+    if (b >= 0x20 && b <= 0x7e) printableCount++;
+  }
+  if (printableCount >= 6) {
+    throw new Error('Snapshot file does not appear to be a valid etcd backup (plaintext content detected)');
+  }
+
   const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
   const destPath = `${backupPath}/${SYSTEM_NAMESPACE}/etcd-snapshot-restore.db`;
   fs.writeFileSync(destPath, snapshotData);
@@ -204,10 +277,16 @@ async function restoreSystem(snapshotPath, password) {
   await initializeSystem(password);
 }
 
-const upload = multer({ dest: '/tmp/uploads/' });
+const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 1024 * 1024 * 1024 } });
 
 app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) => {
   try {
+    const clientIp = req.ip;
+    const bf = await checkBruteForce(clientIp);
+    if (bf?.locked) {
+      return res.status(429).json({ error: `Too many failed attempts. Try again in ${bf.remainingMin} minutes.`, code: 'BRUTE_LOCKED' });
+    }
+
     const { mode, password, primaryIp, joinToken } = req.body;
 
     if (mode === 'create' || !mode) {
@@ -219,6 +298,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       }
       await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
       await bootCluster(nodeId);
+      logEvent('security', 'info', 'System initialized (create)', { nodeId, nodeName });
     } else if (mode === 'join') {
       const joinRes = await fetch(`${getNodeUrl(primaryIp)}/api/system/join`, {
         method: 'POST',
@@ -248,6 +328,23 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
         updateEtcdHosts(joinData.clusterConfig.memberClientUrls);
       }
 
+      // Save etcd auth credentials from master node for authenticated connection
+      if (joinData.clusterConfig.authUsername && joinData.clusterConfig.authPassword) {
+        try {
+          const fs = await import('fs');
+          const path = await import('path');
+          const authDir = path.join(process.env.HOST_BACKUP_PATH || '/data/backup', '__system__', 'etcd');
+          if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
+          fs.writeFileSync(path.join(authDir, 'auth.json'), JSON.stringify({
+            username: joinData.clusterConfig.authUsername,
+            password: joinData.clusterConfig.authPassword,
+          }, null, 2));
+          reconnectEtcd();
+        } catch (e) {
+          console.warn('[Cluster] Failed to save etcd auth credentials:', e.message);
+        }
+      }
+
       // Wait for clustered etcd to become reachable
       console.log('[Cluster] Waiting for clustered ETCD...');
       await waitForEtcd(30, 2000);
@@ -262,6 +359,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       // Register this node with the clustered etcd
       await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
       await bootCluster(nodeId);
+      logEvent('security', 'info', 'System initialized (join)', { nodeId, nodeName, primaryIp });
     } else if (mode === 'restore') {
       const snapshotFile = req.file;
       if (!snapshotFile) throw new Error('Missing snapshot file');
@@ -275,13 +373,19 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       await bootCluster(nodeId);
 
       await performPostRestoreMigration();
+      logEvent('security', 'info', 'System initialized (restore)', { nodeId, nodeName });
     }
 
-    const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
+    const token = await signToken({ nodeId, role: 'admin' }, JWT_SECRET);
     res.cookie('token', token, { httpOnly: true, secure: req.secure, sameSite: 'strict' });
 
     res.json({ success: true });
+
+    // Clear brute force tracking on successful setup
+    await clearBruteForce(clientIp).catch(() => {});
   } catch (e) {
+    // Record failed attempt for brute force tracking
+    await recordFailedAttempt(req.ip).catch(() => {});
     res.status(400).json({ error: e.message, code: 'SETUP_FAILED' });
   }
 });
@@ -315,6 +419,9 @@ app.post('/api/system/join', async (req, res) => {
         initialCluster: clusterInfo.initialCluster,
         initialClusterState: clusterInfo.initialClusterState,
         memberClientUrls: allUrls,
+        clusterToken: clusterInfo.clusterToken,
+        authUsername: clusterInfo.authUsername,
+        authPassword: clusterInfo.authPassword,
       },
     });
   } catch (e) {
@@ -324,6 +431,12 @@ app.post('/api/system/join', async (req, res) => {
 
 app.post('/api/system/unseal', async (req, res) => {
   try {
+    const clientIp = req.ip;
+    const bf = await checkBruteForce(clientIp);
+    if (bf?.locked) {
+      return res.status(429).json({ error: `Too many failed attempts. Try again in ${bf.remainingMin} minutes.`, code: 'BRUTE_LOCKED' });
+    }
+
     const { password } = req.body;
 
     await unsealNode(password);
@@ -334,12 +447,19 @@ app.post('/api/system/unseal', async (req, res) => {
     }
     await registerLocalNode(nodeId, nodeName, nodeIp);
     await bootCluster(nodeId);
+    logEvent('security', 'info', 'Node unsealed', { nodeId, nodeName });
 
-    const token = jwt.sign({ nodeId, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
+    // Revoke any previous sessions for this node
+    await revokeAllSessions(nodeId).catch(e => console.warn('[Session] Failed to revoke prior sessions:', e.message));
+
+    const token = await signToken({ nodeId, role: 'admin' }, JWT_SECRET);
     res.cookie('token', token, { httpOnly: true, secure: req.secure, sameSite: 'strict' });
 
     res.json({ success: true });
+
+    await clearBruteForce(clientIp).catch(() => {});
   } catch (e) {
+    await recordFailedAttempt(req.ip).catch(() => {});
     res.status(400).json({ error: e.message, code: 'UNSEAL_FAILED' });
   }
 });
@@ -366,6 +486,21 @@ app.post('/api/system/rotate-dek', requireAuth, requireUnsealed, async (req, res
     res.json({ success: true });
   } catch (e) {
     res.status(400).json({ error: e.message, code: 'DEK_ROTATE_FAILED' });
+  }
+});
+
+app.post('/api/system/session/refresh', requireAuth, async (req, res) => {
+  try {
+    const oldToken = req.cookies.token;
+    if (!oldToken) return res.status(401).json({ error: 'No session token', code: 'AUTH_REQUIRED' });
+
+    const newToken = await refreshToken(oldToken, JWT_SECRET);
+    if (!newToken) return res.status(401).json({ error: 'Session expired or revoked', code: 'SESSION_EXPIRED' });
+
+    res.cookie('token', newToken, { httpOnly: true, secure: req.secure, sameSite: 'strict' });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message, code: 'REFRESH_FAILED' });
   }
 });
 
@@ -423,6 +558,9 @@ const startBackend = async () => {
       console.log('[Cluster] Failed to bootstrap ETCD.');
       return;
     }
+
+    // Reconnect etcd with auth credentials (bootstrapEtcd may have enabled auth)
+    reconnectEtcd();
 
     console.log('[Cluster] Waiting for ETCD to become reachable...');
     await waitForEtcd();

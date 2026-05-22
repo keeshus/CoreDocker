@@ -16,9 +16,20 @@ const getLogDir = () => {
 };
 
 const logDir = getLogDir();
-fs.mkdirSync(logDir, { recursive: true });
+try { fs.mkdirSync(logDir, { recursive: true }); } catch (e) {
+  console.warn(`[Logger] Could not create log directory ${logDir}: ${e.message}`);
+}
 
-const logStream = fs.createWriteStream(path.join(logDir, 'system.ndjson'), { flags: 'a' });
+const logStream = (() => {
+  try {
+    if (fs.existsSync(logDir)) {
+      return fs.createWriteStream(path.join(logDir, 'system.ndjson'), { flags: 'a' });
+    }
+  } catch (e) {
+    console.warn(`[Logger] Could not access log directory, falling back to stdout: ${e.message}`);
+  }
+  return process.stdout;
+})();
 
 const pinoLogger = pino({
   level: process.env.LOG_LEVEL || 'info',

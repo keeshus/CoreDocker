@@ -1,6 +1,7 @@
 import etcd from './db.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { logEvent } from './logger.js';
 
 const SECRETS_PREFIX = 'secrets/';
 const MASTER_KEY_HASH_KEY = 'system/master_hash';
@@ -198,6 +199,8 @@ export const changeMasterPassword = async (currentPassword, newPassword) => {
 
   const encryptedDEKPayload = iv.toString('hex') + ':' + encryptedDEK.toString('hex');
   await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
+
+  logEvent('security', 'info', 'Master password changed');
 };
 
 export const rotateDEK = async (masterPassword) => {
@@ -256,6 +259,7 @@ export const rotateDEK = async (masterPassword) => {
     await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
 
     console.log('[Secrets] DEK rotated and all data re-encrypted.');
+    logEvent('security', 'info', 'DEK rotated');
   } catch (err) {
     inMemoryDEK = oldDek;
     throw err;

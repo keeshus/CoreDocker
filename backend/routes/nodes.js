@@ -2,6 +2,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getNodes, saveNode, deleteNode } from '../services/db.js';
 import { addEtcdMember } from '../services/etcd-cluster.js';
+import { logEvent } from '../services/logger.js';
 
 const router = express.Router();
 
@@ -29,6 +30,7 @@ router.post('/', async (req, res) => {
     }
 
     await saveNode(id, name, ip, 'offline');
+    logEvent('security', 'info', `Node ${name} (${ip}) added`, { nodeId: id, nodeName: name, nodeIp: ip });
     res.status(201).json({ id, name, ip, status: 'offline' });
   } catch (error) {
     res.status(500).json({ error: error.message, code: 'NODE_CREATE_FAILED' });
@@ -38,6 +40,7 @@ router.post('/', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     await deleteNode(req.params.id);
+    logEvent('security', 'info', `Node ${req.params.id} removed`);
     res.status(204).end();
   } catch (error) {
     res.status(500).json({ error: error.message, code: 'NODE_DELETE_FAILED' });

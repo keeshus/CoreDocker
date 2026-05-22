@@ -63,7 +63,7 @@ const mockSecrets = {
 
 vi.mock('../../backend/services/secrets.js', () => mockSecrets);
 const {
-  closeEtcd, recreateEtcdClient, waitForEtcd,
+  closeEtcd, reconnectEtcd, waitForEtcd,
   registerLocalNode, getNodes, saveNode, deleteNode,
   getLocalNodeConfig, getContainers, getContainerByName,
   saveContainer, updateContainerDockerId, deleteContainer,
@@ -119,7 +119,7 @@ describe('waitForEtcd', () => {
 describe('registerLocalNode', () => {
   it('creates a node entry with lease', async () => {
     await registerLocalNode('node-1', 'Primary', '192.168.1.10');
-    expect(mockEtcd3.lease).toHaveBeenCalledWith(10);
+    expect(mockEtcd3.lease).toHaveBeenCalledWith(30);
     expect(mockLease.put).toHaveBeenCalledWith('nodes/node-1');
   });
 });
