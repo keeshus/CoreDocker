@@ -147,9 +147,18 @@ const reconcileCoreDNS = async (localNodeId) => {
     }
     
     let staticEntries = '';
-    for (const node of nodes) {
+    const sortedNodes = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
+    for (const node of sortedNodes) {
       staticEntries += `    hosts {
         ${node.ip} ${node.id}.core-docker.local
+        fallthrough
+    }\n`;
+    }
+
+    // Add cluster domain pointing to the master node (first in sorted order)
+    if (settings.clusterDomain && sortedNodes.length > 0) {
+      staticEntries += `    hosts {
+        ${sortedNodes[0].ip} ${settings.clusterDomain}
         fallthrough
     }\n`;
     }
@@ -201,7 +210,12 @@ ${staticEntries}
       const fallbackPort = isClusterSim ? (5300 + parseInt(localNodeId.replace(/\D/g, '') || 0)) : 5353;
       const finalPort = process.env.DNS_PRODUCTION === 'false' ? fallbackPort.toString() : '53';
 
-      console.log(`[Reconciler] CoreDNS binding to host port ${finalPort}`);
+      // Bind to the public/client IP so external clients on the network
+      // can reach CoreDNS. Falls back to 0.0.0.0 when NODE_CLIENT_IP is
+      // not set (e.g. Docker Compose dev mode).
+      const bindIp = process.env.NODE_CLIENT_IP || '0.0.0.0';
+
+      console.log(`[Reconciler] CoreDNS binding to ${bindIp}:${finalPort}`);
 
       container = await docker.createContainer({
         Image: image,
@@ -210,8 +224,8 @@ ${staticEntries}
         HostConfig: {
           Binds: [`${hostBindSrc}:/etc/coredns/Corefile`],
           PortBindings: {
-            '53/udp': [{ HostPort: finalPort }],
-            '53/tcp': [{ HostPort: finalPort }]
+            '53/udp': [{ HostIp: bindIp, HostPort: finalPort }],
+            '53/tcp': [{ HostIp: bindIp, HostPort: finalPort }]
           },
           RestartPolicy: { Name: 'always' },
           NetworkMode: 'app-net'

@@ -8,14 +8,10 @@ router.get('/', async (req, res) => {
   try {
     const data = await etcd.get(SETTINGS_KEY).string();
     const settings = data ? JSON.parse(data) : {
-      sharedIpPool: '',
-      internalNetwork: '',
       dnsVip: '',
       dnsVipInterface: '',
       dnsForwarder: '',
       clusterDomain: '',
-      clusterDomain: '',
-      clusterVip: '',
     };
     res.json(settings);
   } catch (error) {

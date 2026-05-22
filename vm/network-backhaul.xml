@@ -1,6 +1,6 @@
 <network>
   <name>coredocker-backhaul</name>
-  <forward mode='bridge'/>
+  <forward mode='route'/>
   <bridge name='virbr-cd-bh' stp='on' delay='0'/>
   <domain name='backhaul.coredocker.local'/>
   <ip address='10.100.0.1' netmask='255.255.255.0'>

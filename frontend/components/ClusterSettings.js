@@ -5,7 +5,7 @@ import { useUI } from '../lib/UIProvider';
 
 export default function ClusterSettings() {
   const { showToast, showConfirm } = useUI();
-  const [settings, setSettings] = useState({ sharedIpPool: '', internalNetwork: '', dnsVip: '', dnsVipInterface: '', dnsForwarder: '', clusterDomain: '', clusterVip: '' });
+  const [settings, setSettings] = useState({ dnsVip: '', dnsVipInterface: '', dnsForwarder: '', clusterDomain: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -177,45 +177,7 @@ export default function ClusterSettings() {
             placeholder="e.g. coredocker.domain.ext"
             style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
           />
-          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>The main domain name for the whole cluster (activated after unseal).</small>
-        </div>
-
-        <div>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Shared Cluster VIP</label>
-          <input
-            type="text"
-            value={settings.clusterVip}
-            onChange={e => setSettings({...settings, clusterVip: e.target.value})}
-            placeholder="e.g. 192.168.1.100"
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-          />
-          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>The floating IP address that users connect to. Point your Global Domain to this IP.</small>
-        </div>
-
-        <hr style={{ border: 'none', borderTop: '1px solid #e2e8f0', margin: '10px 0' }} />
-
-        <div>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Shared Virtual IP (VIP) Pool</label>
-          <input 
-            type="text" 
-            value={settings.sharedIpPool} 
-            onChange={e => setSettings({...settings, sharedIpPool: e.target.value})}
-            placeholder="e.g. 192.168.1.200-192.168.1.210"
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-          />
-          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Range of IP addresses managed by KeepaliveD for High Availability.</small>
-        </div>
-
-        <div>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Internal Network Interface / IP Range</label>
-          <input
-            type="text"
-            value={settings.internalNetwork}
-            onChange={e => setSettings({...settings, internalNetwork: e.target.value})}
-            placeholder="e.g. eth1 or 10.0.0.0/24"
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-          />
-          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Dedicated network for internal cluster traffic (ETCD, cross-node sync).</small>
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>The main domain name for the whole cluster. Resolves to the master node IP via CoreDNS (activated after unseal).</small>
         </div>
 
         <div>
