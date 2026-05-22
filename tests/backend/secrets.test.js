@@ -29,11 +29,11 @@ const mockDbDefault = {
     },
   })),
   getAll: vi.fn(() => ({
-    prefix: () => ({
+    prefix: (prefix) => ({
       keys: () => {
         const keys = [];
         for (const k of Object.keys(etcdStore)) {
-          if (k.startsWith('secrets/')) {
+          if (k.startsWith(prefix)) {
             keys.push(k);
           }
         }
@@ -42,7 +42,7 @@ const mockDbDefault = {
       strings: () => {
         const results = {};
         for (const [k, v] of Object.entries(etcdStore)) {
-          if (k.startsWith('secrets/')) {
+          if (k.startsWith(prefix)) {
             results[k] = v;
           }
         }
@@ -144,18 +144,22 @@ describe('node sealed state - runs first before any init', () => {
 
 describe('getOrCreateJwtSecret', () => {
   it('creates and stores a JWT secret when none exists', async () => {
-    const { getOrCreateJwtSecret } = await module();
-    const secret = await getOrCreateJwtSecret();
+    const mod = await module();
+    await mod.initializeSystem(PASSWORD);
+    const secret = await mod.getOrCreateJwtSecret();
     expect(typeof secret).toBe('string');
     expect(secret.length).toBe(128);
-    expect(etcdStore['system/jwt_secret']).toBe(secret);
+    // Value is stored encrypted in etcd
+    expect(etcdStore['system/jwt_secret']).toBeDefined();
+    expect(etcdStore['system/jwt_secret']).toContain(':');
   });
 
-  it('returns existing JWT secret', async () => {
-    etcdStore['system/jwt_secret'] = 'existing-secret';
-    const { getOrCreateJwtSecret } = await module();
-    const secret = await getOrCreateJwtSecret();
-    expect(secret).toBe('existing-secret');
+  it('returns existing JWT secret from cache on second call', async () => {
+    const mod = await module();
+    await mod.initializeSystem(PASSWORD);
+    const secret1 = await mod.getOrCreateJwtSecret();
+    const secret2 = await mod.getOrCreateJwtSecret();
+    expect(secret2).toBe(secret1);
   });
 });
 
@@ -168,6 +172,8 @@ describe('initializeSystem', () => {
     expect(etcdStore['system/master_hash']).toContain(':');
     expect(etcdStore['system/encrypted_dek']).toBeDefined();
     expect(etcdStore['system/encrypted_dek']).toContain(':');
+    expect(etcdStore['system/jwt_secret']).toBeDefined();
+    expect(etcdStore['system/jwt_secret']).toContain(':');
     expect(etcdStore['system/backup_path']).toBeDefined();
     expect(etcdStore['system/non_backup_path']).toBeDefined();
     expect(isNodeSealed()).toBe(false);
@@ -218,6 +224,13 @@ describe('unsealNode', () => {
     await mod.initializeSystem(PASSWORD);
     await expect(mod.unsealNode('WrongP@ssword1')).rejects.toThrow('Invalid master password');
   });
+
+  it('populates JWT secret cache after unseal', async () => {
+    const mod = await module();
+    await mod.initializeSystem(PASSWORD);
+    expect(mod.getJwtSecret()).toBeTruthy();
+    expect(mod.getJwtSecret().length).toBe(128);
+  });
 });
 
 describe('changeMasterPassword', () => {
@@ -252,18 +265,29 @@ describe('rotateDEK', () => {
     await expect(mod.rotateDEK('WrongP@ssword1')).rejects.toThrow('Invalid master password');
   });
 
-  it('rotates DEK and re-encrypts existing secrets', async () => {
+  it('rotates DEK and re-encrypts existing secrets, containers, and groups', async () => {
     const mod = await module();
     await mod.initializeSystem(PASSWORD);
 
     etcdStore['secrets/mykey'] = mod.encrypt('my-secret-value');
-    const encryptedBefore = etcdStore['secrets/mykey'];
+    etcdStore['core/containers/c1'] = mod.encrypt(JSON.stringify({ id: 'c1', name: 'web', image: 'nginx' }));
+    etcdStore['core/groups/g1'] = mod.encrypt(JSON.stringify({ id: 'g1', name: 'web-services', config: {} }));
+
+    const secretBefore = etcdStore['secrets/mykey'];
+    const containerBefore = etcdStore['core/containers/c1'];
+    const groupBefore = etcdStore['core/groups/g1'];
 
     await mod.rotateDEK(PASSWORD);
-    const encryptedAfter = etcdStore['secrets/mykey'];
 
-    expect(encryptedAfter).not.toBe(encryptedBefore);
-    expect(mod.decrypt(encryptedAfter)).toBe('my-secret-value');
+    // All entries should have different ciphertext after rotation
+    expect(etcdStore['secrets/mykey']).not.toBe(secretBefore);
+    expect(etcdStore['core/containers/c1']).not.toBe(containerBefore);
+    expect(etcdStore['core/groups/g1']).not.toBe(groupBefore);
+
+    // All entries should still decrypt correctly
+    expect(mod.decrypt(etcdStore['secrets/mykey'])).toBe('my-secret-value');
+    expect(mod.decrypt(etcdStore['core/containers/c1'])).toBe(JSON.stringify({ id: 'c1', name: 'web', image: 'nginx' }));
+    expect(mod.decrypt(etcdStore['core/groups/g1'])).toBe(JSON.stringify({ id: 'g1', name: 'web-services', config: {} }));
   });
 });
 

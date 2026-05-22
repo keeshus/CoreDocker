@@ -162,15 +162,20 @@ describe('saveContainer / getContainers / getContainerByName / deleteContainer',
     const config = { image: 'nginx', memoryLimit: 512, cpuLimit: 1 };
     await saveContainer('cid-123', 'web-nginx', config, 'running', 'docker-abc', 'node-1');
 
+    // Verify data is encrypted at rest (in real impl, mock prepends 'encrypted:')
     const key = Object.keys(etcdStore).find(k => k.startsWith('core/containers/'));
     expect(key).toBeDefined();
-    const parsed = JSON.parse(etcdStore[key]);
-    expect(parsed.id).toBe('cid-123');
-    expect(parsed.name).toBe('web-nginx');
-    expect(parsed.config).toEqual(config);
-    expect(parsed.status).toBe('running');
-    expect(parsed.docker_id).toBe('docker-abc');
-    expect(parsed.current_node).toBe('node-1');
+    expect(etcdStore[key]).toContain('encrypted:');
+
+    // Verify getContainers decrypts correctly
+    const containers = await getContainers();
+    const saved = containers.find(c => c.id === 'cid-123');
+    expect(saved).toBeDefined();
+    expect(saved.name).toBe('web-nginx');
+    expect(saved.config).toEqual(config);
+    expect(saved.status).toBe('running');
+    expect(saved.docker_id).toBe('docker-abc');
+    expect(saved.current_node).toBe('node-1');
   });
 
   it('getContainers returns all containers', async () => {
@@ -221,11 +226,12 @@ describe('saveContainer / getContainers / getContainerByName / deleteContainer',
   });
 
   it('updateContainerDockerId updates docker_id', async () => {
-    etcdStore['core/containers/c1'] = JSON.stringify({ id: 'c1', name: 'web', config: {}, status: 'running', docker_id: null });
+    etcdStore['core/containers/c1'] = 'encrypted:' + JSON.stringify({ id: 'c1', name: 'web', config: {}, status: 'running', docker_id: null });
 
     await updateContainerDockerId('c1', 'new-docker-id-123');
 
-    const updated = JSON.parse(etcdStore['core/containers/c1']);
+    const containers = await getContainers();
+    const updated = containers.find(c => c.id === 'c1');
     expect(updated.docker_id).toBe('new-docker-id-123');
   });
 });
@@ -271,10 +277,14 @@ describe('Group CRUD operations', () => {
     expect(key).toBeDefined();
     const raw = etcdStore[key];
     expect(raw).toBeDefined();
-    const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    expect(obj.id).toBe('g1');
-    expect(obj.name).toBe('web-services');
-    expect(obj.config.highAvailability).toBe(true);
+    // Verify data is encrypted at rest
+    expect(raw).toContain('encrypted:');
+    // Verify getGroups decrypts correctly
+    const groups = await getGroups();
+    const saved = groups.find(g => g.id === 'g1');
+    expect(saved).toBeDefined();
+    expect(saved.name).toBe('web-services');
+    expect(saved.config.highAvailability).toBe(true);
   });
 
   it('getGroups returns all groups', async () => {

@@ -9,6 +9,7 @@ const JWT_SECRET_KEY = 'system/jwt_secret';
 const MIN_PASSWORD_LENGTH = 12;
 
 let inMemoryDEK = null;
+let jwtSecretCache = null;
 
 export const isSystemInitialized = async () => {
   const hash = await etcd.get(MASTER_KEY_HASH_KEY).string();
@@ -38,13 +39,30 @@ export const validatePasswordStrength = (password) => {
 };
 
 export const getOrCreateJwtSecret = async () => {
-  let secret = await etcd.get(JWT_SECRET_KEY).string();
-  if (!secret) {
-    secret = crypto.randomBytes(64).toString('hex');
-    await etcd.put(JWT_SECRET_KEY).value(secret);
+  if (jwtSecretCache) return jwtSecretCache;
+  const stored = await etcd.get(JWT_SECRET_KEY).string();
+  if (!stored) {
+    const secret = crypto.randomBytes(64).toString('hex');
+    const encrypted = encrypt(secret);
+    await etcd.put(JWT_SECRET_KEY).value(encrypted);
+    jwtSecretCache = secret;
+    return secret;
   }
-  return secret;
+  // Try to decrypt (new encrypted format)
+  try {
+    const decrypted = decrypt(stored);
+    jwtSecretCache = decrypted;
+    return decrypted;
+  } catch {
+    // Legacy plaintext format — migrate to encrypted
+    const encrypted = encrypt(stored);
+    await etcd.put(JWT_SECRET_KEY).value(encrypted);
+    jwtSecretCache = stored;
+    return stored;
+  }
 };
+
+export const getJwtSecret = () => jwtSecretCache;
 
 export const initializeSystem = async (password) => {
   if (await isSystemInitialized()) {
@@ -71,6 +89,12 @@ export const initializeSystem = async (password) => {
 
   const encryptedDEKPayload = iv.toString('hex') + ':' + encryptedDEK.toString('hex');
   await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
+
+  // Generate and encrypt the JWT secret
+  const jwtSecret = crypto.randomBytes(64).toString('hex');
+  const encryptedJwt = encrypt(jwtSecret);
+  await etcd.put(JWT_SECRET_KEY).value(encryptedJwt);
+  jwtSecretCache = jwtSecret;
 
   console.log('[Secrets] System initialized and node unsealed.');
 };
@@ -103,6 +127,20 @@ export const unsealNode = async (password) => {
   dek = Buffer.concat([dek, decipher.final()]);
 
   inMemoryDEK = dek;
+
+  // Decrypt the JWT secret now that DEK is available
+  const storedJwt = await etcd.get(JWT_SECRET_KEY).string();
+  if (storedJwt) {
+    try {
+      jwtSecretCache = decrypt(storedJwt);
+    } catch {
+      // Legacy plaintext format — migrate to encrypted
+      const encrypted = encrypt(storedJwt);
+      await etcd.put(JWT_SECRET_KEY).value(encrypted);
+      jwtSecretCache = storedJwt;
+    }
+  }
+
   console.log('[Secrets] Node successfully unsealed.');
 };
 
@@ -181,13 +219,31 @@ export const rotateDEK = async (masterPassword) => {
     value: decrypt(value)
   }));
 
+  // Also collect containers and groups that are now encrypted with the DEK
+  const containers = await etcd.getAll().prefix('core/containers/').strings();
+  const decryptedContainers = Object.entries(containers).map(([key, value]) => ({
+    key,
+    value: decrypt(value)
+  }));
+
+  const groups = await etcd.getAll().prefix('core/groups/').strings();
+  const decryptedGroups = Object.entries(groups).map(([key, value]) => ({
+    key,
+    value: decrypt(value)
+  }));
+
   const newDek = crypto.randomBytes(32);
   const oldDek = inMemoryDEK;
   inMemoryDEK = newDek;
 
   try {
-    for (const secret of decryptedSecrets) {
-      await etcd.put(secret.key).value(encrypt(secret.value));
+    const allEntries = [
+      ...decryptedSecrets,
+      ...decryptedContainers,
+      ...decryptedGroups,
+    ];
+    for (const entry of allEntries) {
+      await etcd.put(entry.key).value(encrypt(entry.value));
     }
 
     const masterKey = crypto.scryptSync(masterPassword, salt, 32);
@@ -199,7 +255,7 @@ export const rotateDEK = async (masterPassword) => {
     const encryptedDEKPayload = iv.toString('hex') + ':' + encryptedDEK.toString('hex');
     await etcd.put(ENCRYPTED_DEK_KEY).value(encryptedDEKPayload);
 
-    console.log('[Secrets] DEK rotated and secrets re-encrypted.');
+    console.log('[Secrets] DEK rotated and all data re-encrypted.');
   } catch (err) {
     inMemoryDEK = oldDek;
     throw err;

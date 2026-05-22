@@ -5,6 +5,7 @@ vi.mock('../../backend/services/db.js', () => ({
   getLocalNodeConfig: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('../../backend/services/ephemeral-tasks.js', () => ({
+  SYSTEM_NAMESPACE: '__system__',
   runEphemeralTask: vi.fn().mockResolvedValue({ stdout: '', exitCode: 0 }),
   writeFileToHost: vi.fn().mockResolvedValue(),
   removeFileFromHost: vi.fn().mockResolvedValue(),

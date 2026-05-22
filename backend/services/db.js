@@ -22,7 +22,7 @@ export const closeEtcd = () => {
  */
 class CoreDB {
   _shouldEncrypt(key) {
-    return key.startsWith('core/secrets/') || key.startsWith('secrets/');
+    return key.startsWith('secrets/') || key.startsWith('core/containers/') || key.startsWith('core/groups/');
   }
 
   _processValue(key, value, decrypting = false) {
@@ -30,7 +30,10 @@ class CoreDB {
     let processed = value;
 
     if (this._shouldEncrypt(key)) {
-      processed = decrypting ? decrypt(value) : encrypt(value);
+      if (!decrypting) {
+        processed = typeof processed === 'string' ? processed : JSON.stringify(processed);
+      }
+      processed = decrypting ? decrypt(value) : encrypt(processed);
     }
 
     if (decrypting) {
@@ -200,8 +203,8 @@ export const getLocalNodeConfig = async () => {
 
 export const getContainers = async () => {
   try {
-    const allContainers = await etcd.getAll().prefix(PREFIX).strings();
-    return Object.values(allContainers).map(v => { try { return JSON.parse(v); } catch (e) { return null; } }).filter(Boolean);
+    const allContainers = await db.getAll(PREFIX);
+    return Object.values(allContainers).filter(v => v !== null && typeof v === 'object');
   } catch (e) {
     console.error(`Failed to get containers from ETCD: ${e.message}`);
     return [];
@@ -215,20 +218,18 @@ export const getContainerByName = async (name) => {
 export const saveContainer = async (id, name, config, status, docker_id = null, current_node = null) => {
   const container = { id, name, config, status, docker_id, current_node };
   const key = `${PREFIX}${id}`;
-  const plaintextValue = JSON.stringify(container);
-  await etcd.put(key).value(plaintextValue);
+  await db.put(key, container);
 };
 
 export const updateContainerDockerId = async (id, docker_id) => {
-  const raw = await etcd.get(`${PREFIX}${id}`).string();
-  if (raw) {
-    const c = JSON.parse(raw);
+  const c = await db.get(`${PREFIX}${id}`);
+  if (c) {
     c.docker_id = docker_id;
-    await etcd.put(`${PREFIX}${id}`).value(JSON.stringify(c));
+    await db.put(`${PREFIX}${id}`, c);
   }
 };
 export const deleteContainer = async (id) => {
-  await etcd.delete().key(`${PREFIX}${id}`);
+  await db.delete(`${PREFIX}${id}`);
 };
 
 export const getGroups = async () => {

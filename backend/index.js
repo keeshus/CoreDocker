@@ -33,6 +33,7 @@ import {
   unsealNode,
   verifyClusterToken,
   getOrCreateJwtSecret,
+  getJwtSecret,
 } from './services/secrets.js';
 
 const app = express();
@@ -209,12 +210,13 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
   try {
     const { mode, password, primaryIp, joinToken } = req.body;
 
-    if (!JWT_SECRET) {
-      JWT_SECRET = await getOrCreateJwtSecret();
-    }
-
     if (mode === 'create' || !mode) {
       await initializeSystem(password);
+      JWT_SECRET = getJwtSecret();
+      if (!JWT_SECRET) {
+        // Fallback for backward compat — shouldn't happen with new init
+        JWT_SECRET = await getOrCreateJwtSecret();
+      }
       await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
       await bootCluster(nodeId);
     } else if (mode === 'join') {
@@ -250,6 +252,13 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       console.log('[Cluster] Waiting for clustered ETCD...');
       await waitForEtcd(30, 2000);
 
+      // Unseal with the provided password to decrypt DEK and JWT secret from cluster ETCD
+      await unsealNode(password);
+      JWT_SECRET = getJwtSecret();
+      if (!JWT_SECRET) {
+        JWT_SECRET = await getOrCreateJwtSecret();
+      }
+
       // Register this node with the clustered etcd
       await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
       await bootCluster(nodeId);
@@ -258,6 +267,10 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       if (!snapshotFile) throw new Error('Missing snapshot file');
 
       await restoreSystem(snapshotFile.path, password);
+      JWT_SECRET = getJwtSecret();
+      if (!JWT_SECRET) {
+        JWT_SECRET = await getOrCreateJwtSecret();
+      }
       await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
       await bootCluster(nodeId);
 
@@ -313,11 +326,12 @@ app.post('/api/system/unseal', async (req, res) => {
   try {
     const { password } = req.body;
 
+    await unsealNode(password);
+    JWT_SECRET = getJwtSecret();
     if (!JWT_SECRET) {
+      // Fallback for backward compat — shouldn't happen with new unseal
       JWT_SECRET = await getOrCreateJwtSecret();
     }
-
-    await unsealNode(password);
     await registerLocalNode(nodeId, nodeName, nodeIp);
     await bootCluster(nodeId);
 
@@ -412,8 +426,6 @@ const startBackend = async () => {
 
     console.log('[Cluster] Waiting for ETCD to become reachable...');
     await waitForEtcd();
-
-    JWT_SECRET = await getOrCreateJwtSecret();
 
     await registerLocalNode(nodeId, nodeName, nodeIp);
 
