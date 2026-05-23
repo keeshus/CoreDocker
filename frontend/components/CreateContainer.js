@@ -24,6 +24,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     shmSize: '',
     devices: '',
     privileged: false,
+    internetAccess: false,
     current_node: ''
   };
 
@@ -61,7 +62,8 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
         stopGracePeriod: initialData.stopGracePeriod || '',
         shmSize: initialData.shmSize || '',
         devices: initialData.devices || '',
-        privileged: initialData.privileged || false
+        privileged: initialData.privileged || false,
+        internetAccess: initialData.internetAccess ?? false
       });
       setIsOpen(true);
     } else {
@@ -178,6 +180,16 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                 </select>
                 <small style={{ color: '#64748b' }}>Containers with the same group name are linked in an isolated network.</small>
               </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={formData.internetAccess}
+                  onChange={e => setFormData({...formData, internetAccess: e.target.checked})}
+                />
+                <span style={{ fontWeight: 'bold', color: '#475569', fontSize: '0.9em' }}>Internet connected</span>
+              </label>
+              <small style={{ color: '#64748b', marginLeft: '25px', marginTop: '-10px' }}>When unchecked, the container runs in an isolated network without external internet access.</small>
 
               <details>
                 <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Proxy Settings (Nginx)</summary>

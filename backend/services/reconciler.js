@@ -1,6 +1,7 @@
 import docker from './docker.js';
-import { getContainers, updateContainerDockerId, getNodes } from './db.js';
+import { getContainers, updateContainerDockerId, getNodes, getGroups } from './db.js';
 import { addRoute } from './nginx.js';
+import { ensureContainerNetworks, ensureGroupNetwork } from './network-manager.js';
 import { isNodeSealed } from './secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
 import { runEphemeralTask } from './ephemeral-tasks.js';
@@ -286,6 +287,47 @@ ${staticEntries}
   }
 };
 
+const reconcileNetworks = async (localNodeId) => {
+  console.log('[Reconciler] Starting network reconciliation...');
+
+  let savedContainers;
+  try {
+    savedContainers = await getContainers();
+  } catch (e) {
+    console.error(`[Reconciler] Failed to fetch containers for network reconciliation: ${e.message}`);
+    return;
+  }
+
+  for (const saved of savedContainers) {
+    if (saved.current_node && saved.current_node !== localNodeId) continue;
+    if (!saved.docker_id) continue;
+
+    try {
+      await ensureContainerNetworks(saved.docker_id, saved.name, saved.config?.group || '', saved.config?.internetAccess ?? false);
+    } catch (e) {
+      console.warn(`[Reconciler] Network reconciliation failed for container ${saved.name}: ${e.message}`);
+    }
+  }
+
+  let groups;
+  try {
+    groups = await getGroups();
+  } catch (e) {
+    console.error(`[Reconciler] Failed to fetch groups for network reconciliation: ${e.message}`);
+    return;
+  }
+
+  for (const group of groups) {
+    try {
+      await ensureGroupNetwork(group.name, group.config?.internetAccess ?? false);
+    } catch (e) {
+      console.warn(`[Reconciler] Network reconciliation failed for group ${group.name}: ${e.message}`);
+    }
+  }
+
+  console.log('[Reconciler] Network reconciliation completed.');
+};
+
 export const reconcileContainers = async (localNodeId) => {
   console.log(`[Reconciler] Starting reconciliation for Node ${localNodeId}...`);
   
@@ -309,6 +351,14 @@ export const reconcileContainers = async (localNodeId) => {
 
     for (const saved of savedContainers) {
     if (saved.current_node && saved.current_node !== localNodeId) {
+      // Check if the assigned node is still alive — don't touch its containers
+      let nodes;
+      try { nodes = await getNodes(); } catch (e) { nodes = []; }
+      const nodeAlive = nodes.some(n => n.id === saved.current_node);
+      if (nodeAlive) {
+        continue;
+      }
+      // Node is dead — clean up orphaned containers running here
       try {
         const localC = docker.getContainer(saved.name);
         const inspect = await localC.inspect();
@@ -337,16 +387,10 @@ export const reconcileContainers = async (localNodeId) => {
         try {
           const createOpts = await buildCreateOpts(name, config.image, config.env, config.volumes, config.ports, config.restartPolicy, config.resources, config);
           container = await docker.createContainer(createOpts);
-          if (config.group) {
-            const networkName = `group-${config.group}`;
-            let network;
-            try {
-              network = docker.getNetwork(networkName);
-              await network.inspect();
-            } catch (netErr) {
-              network = await docker.createNetwork({ Name: networkName });
-            }
-            try { await network.connect({ Container: container.id }); } catch(e) {}
+          try {
+            await ensureContainerNetworks(container.id, name, config.group || '', config.internetAccess ?? false);
+          } catch (netErr) {
+            console.warn(`[Reconciler] Container ${name} created but network setup failed: ${netErr.message}`);
           }
         } catch (createErr) {
           console.error(`[Reconciler] Failed to create ${name}:`, createErr.message);
@@ -373,7 +417,8 @@ export const reconcileContainers = async (localNodeId) => {
       console.error(`[Reconciler] Error ensuring ${name} is running:`, e.message);
     }
   }
-  console.log('[Reconciler] Container reconciliation completed.');
+  await reconcileNetworks(localNodeId);
+	  console.log('[Reconciler] Container reconciliation completed.');
 } catch (globalErr) {
   console.error(`[Reconciler] Fatal error in reconciliation loop: ${globalErr.message}`);
 }
@@ -392,6 +437,7 @@ export const startReconciler = (localNodeId) => {
       if (!isNodeSealed()) {
         await reconcileDNSVIP(localNodeId);
       }
+      await reconcileNetworks(localNodeId);
     } catch (e) {
       console.error('[Reconciler] Periodic reconciliation error:', e.message);
     }

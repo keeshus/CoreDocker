@@ -91,6 +91,21 @@ app.use('/api/system', authLimiter);
 
 app.use('/api', generalLimiter);
 
+const mutationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many mutation requests, try again later', code: 'MUTATION_LIMITED' },
+});
+
+const mutationRateLimit = (req, res, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    return mutationLimiter(req, res, next);
+  }
+  next();
+};
+
 // Brute force protection — tracks failed auth attempts per IP in etcd.
 // After 5 failures the IP is locked out for 2^failures minutes (max 24h).
 const BRUTE_KEY_PREFIX = 'system/brute/';
@@ -211,14 +226,14 @@ const requireUnsealed = (req, res, next) => {
   next();
 };
 
-app.use('/api/containers', requireAuth, requireUnsealed, containerRoutes);
+app.use('/api/containers', requireAuth, requireUnsealed, mutationRateLimit, containerRoutes);
 app.use('/api/info', requireAuth, infoRoutes);
 app.use('/api/events', requireAuth, eventRoutes);
 app.use('/api/nodes', requireAuth, nodeRoutes);
 app.use('/api/secrets', requireAuth, requireUnsealed, secretRoutes);
 app.use('/api/tasks', requireAuth, requireUnsealed, taskRoutes);
 app.use('/api/settings', requireAuth, requireUnsealed, settingsRoutes);
-app.use('/api/groups', requireAuth, requireUnsealed, groupRoutes);
+app.use('/api/groups', requireAuth, requireUnsealed, mutationRateLimit, groupRoutes);
 
 app.get('/api/system/status', async (req, res) => {
   let authenticated = false;

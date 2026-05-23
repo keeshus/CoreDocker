@@ -1,10 +1,13 @@
 import express from 'express';
 import docker from '../services/docker.js';
 import etcd from '../services/db.js';
+import { ensureContainerNetworks, removeContainerNetworks } from '../services/network-manager.js';
 import { addRoute, removeRoute, getNodeUrl } from '../services/nginx.js';
 import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig, getContainers, getNodes } from '../services/db.js';
 import { generateClusterToken } from '../services/secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
+import { withTimeout } from '../utils/timeout.js';
+import { withContainerLock } from '../utils/locks.js';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs/promises';
 
@@ -15,6 +18,9 @@ const NAME_RE = /^[a-zA-Z0-9._-]+$/;
 const URI_RE = /^\/[a-zA-Z0-9._\-\/]*$/;
 const PORT_RE = /^\d+$/;
 const DEVICES_RE = /^[a-zA-Z0-9_\/.,:]+$/;
+
+const IMAGE_PULL_TIMEOUT = 5 * 60 * 1000;
+const CONTAINER_OP_TIMEOUT = 30 * 1000;
 
 function validateContainerInput(body) {
   const errors = [];
@@ -36,6 +42,28 @@ function validateContainerInput(body) {
     errors.push('Invalid devices format');
   }
   return errors;
+}
+
+async function ensureImage(image) {
+  try {
+    await withTimeout(docker.getImage(image).inspect(), CONTAINER_OP_TIMEOUT);
+  } catch (e) {
+    await withTimeout(new Promise((resolve, reject) => {
+      docker.pull(image, (err, stream) => {
+        if (err) return reject(err);
+        docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
+      });
+    }), IMAGE_PULL_TIMEOUT, `Image pull timed out for ${image}`);
+  }
+}
+
+async function checkPrivilegedAllowed(privileged) {
+  if (!privileged) return;
+  const settings = await etcd.get('core/settings').string();
+  const allowPrivileged = settings ? JSON.parse(settings).allowPrivileged === true : false;
+  if (!allowPrivileged) {
+    throw Object.assign(new Error('Privileged containers are disabled in cluster settings'), { code: 'PRIVILEGED_DISABLED', status: 403 });
+  }
 }
 
 const proxyToNode = async (nodeId, req, res) => {
@@ -84,24 +112,13 @@ const proxyToNode = async (nodeId, req, res) => {
   return false;
 };
 
-const ensureNetworkConnections = async (group, containerId) => {
-  if (group) {
-    const networkName = `group-${group}`;
-    let network;
-    try {
-      network = docker.getNetwork(networkName);
-      await network.inspect();
-    } catch (e) {
-      network = await docker.createNetwork({ Name: networkName });
-    }
-
-    try { await network.connect({ Container: containerId }); } catch(e) {}
-  }
+const ensureNetworkConnections = async (dockerContainerId, group, internetAccess, name) => {
+  await ensureContainerNetworks(dockerContainerId, name, group, internetAccess);
 };
 
 router.post('/', async (req, res) => {
   try {
-    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false, internetAccess = false } = req.body;
 
     const validationErrors = validateContainerInput(req.body);
     if (validationErrors.length > 0) {
@@ -121,42 +138,45 @@ router.post('/', async (req, res) => {
     const config = {
       image, name, env, volumes, ports, restartPolicy, resources, proxy, group,
       ha, ha_allowed_nodes: req.body.ha_allowed_nodes || [],
-      tmpfs, stopGracePeriod, shmSize, devices, privileged,
+      tmpfs, stopGracePeriod, shmSize, devices, privileged, internetAccess,
     };
 
-    if (privileged) {
-      const settings = await etcd.get('core/settings').string();
-      const allowPrivileged = settings ? JSON.parse(settings).allowPrivileged === true : false;
-      if (!allowPrivileged) {
-        return res.status(403).json({ error: 'Privileged containers are disabled in cluster settings', code: 'PRIVILEGED_DISABLED' });
+    await withContainerLock(`name:${name}`, async () => {
+      const existing = await getContainerByName(name);
+      if (existing) {
+        throw Object.assign(new Error(`Container with name "${name}" already exists`), { status: 409, code: 'CONFLICT' });
       }
-    }
 
-    await saveContainer(containerId, name, config, 'running', null, nodeId);
+      await checkPrivilegedAllowed(privileged);
+      await ensureImage(image);
 
-    try {
-      await docker.getImage(image).inspect();
-    } catch (e) {
-      await new Promise((resolve, reject) => {
-        docker.pull(image, (err, stream) => {
-          if (err) return reject(err);
-          docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
-        });
-      });
-    }
+      const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
+      const container = await withTimeout(docker.createContainer(createOpts), CONTAINER_OP_TIMEOUT, 'Container creation timed out');
 
-    const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
-    const container = await docker.createContainer(createOpts);
+      try {
+        await saveContainer(containerId, name, config, 'running', container.id, nodeId);
 
-    await saveContainer(containerId, name, config, 'running', container.id, nodeId);
-    await ensureNetworkConnections(group, container.id);
+        try {
+          await ensureNetworkConnections(container.id, group, internetAccess, name);
 
-    if (proxy.enabled && proxy.uri && proxy.port) {
-      await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
-    }
+          if (proxy.enabled && proxy.uri && proxy.port) {
+            await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
+          }
 
-    res.status(201).json({ message: 'Container created successfully', id: container.id, db_id: containerId });
+          res.status(201).json({ message: 'Container created successfully', id: container.id, db_id: containerId });
+        } catch (err) {
+          await deleteContainer(containerId).catch(() => {});
+          await container.remove({ force: true }).catch(() => {});
+          throw err;
+        }
+      } catch (err) {
+        await container.remove({ force: true }).catch(() => {});
+        throw err;
+      }
+    });
   } catch (error) {
+    if (error.status === 403) return res.status(403).json({ error: error.message, code: error.code });
+    if (error.status === 409) return res.status(409).json({ error: error.message, code: error.code });
     res.status(500).json({ error: 'Failed to create container', details: error.message, code: 'CONTAINER_CREATE_FAILED' });
   }
 });
@@ -164,7 +184,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false } = req.body;
+    const { image, name, env = [], volumes = [], ports = [], restartPolicy = 'unless-stopped', resources = {}, proxy = {}, group = '', ha = false, tmpfs = '', stopGracePeriod = '', shmSize = '', devices = '', privileged = false, internetAccess = false } = req.body;
 
     const validationErrors = validateContainerInput(req.body);
     if (validationErrors.length > 0) {
@@ -182,63 +202,86 @@ router.put('/:id', async (req, res) => {
 
     const existingNode = process.env.NODE_ID || 'master';
 
-    let container = docker.getContainer(id);
-    let inspect;
-    try {
-      inspect = await container.inspect();
-    } catch(e) {
-      return res.status(404).json({ error: 'Container not found in Docker', code: 'NOT_FOUND' });
-    }
-
-    const oldName = inspect.Name.replace(/^\//, '');
-    await container.stop();
-    await container.remove();
-    await removeRoute(oldName);
-
-    const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group, ha, ha_allowed_nodes: req.body.ha_allowed_nodes || [], tmpfs, stopGracePeriod, shmSize, devices, privileged };
-    const dbContainer = await getContainerByName(oldName);
-    let dbId = dbContainer ? dbContainer.id : uuidv4();
-
-    if (dbContainer && oldName !== name) {
-      await deleteContainer(dbContainer.id);
-      dbId = uuidv4();
-    }
-
-    if (privileged) {
-      const settings = await etcd.get('core/settings').string();
-      const allowPrivileged = settings ? JSON.parse(settings).allowPrivileged === true : false;
-      if (!allowPrivileged) {
-        return res.status(403).json({ error: 'Privileged containers are disabled in cluster settings', code: 'PRIVILEGED_DISABLED' });
+    await withContainerLock(id, async () => {
+      let container = docker.getContainer(id);
+      let inspect;
+      try {
+        inspect = await withTimeout(container.inspect(), CONTAINER_OP_TIMEOUT, 'Container inspect timed out');
+      } catch (e) {
+        throw Object.assign(new Error('Container not found in Docker'), { status: 404, code: 'NOT_FOUND' });
       }
-    }
 
-    await saveContainer(dbId, name, config, 'running', null, existingNode);
+      const oldName = inspect.Name.replace(/^\//, '');
+      const dbContainer = await getContainerByName(oldName);
+      const rollback = {
+        dockerId: container.id,
+        oldName,
+        dbId: dbContainer ? dbContainer.id : null,
+        dbRecord: dbContainer ? JSON.parse(JSON.stringify(dbContainer)) : null,
+      };
 
-    try {
-      await docker.getImage(image).inspect();
-    } catch (e) {
-      await new Promise((resolve, reject) => {
-        docker.pull(image, (err, stream) => {
-          if (err) return reject(err);
-          docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
-        });
-      });
-    }
+      let dbId = dbContainer ? dbContainer.id : uuidv4();
+      if (dbContainer && oldName !== name) {
+        dbId = uuidv4();
+      }
 
-    const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
-    container = await docker.createContainer(createOpts);
+      const config = { image, name, env, volumes, ports, restartPolicy, resources, proxy, group, ha, ha_allowed_nodes: req.body.ha_allowed_nodes || [], tmpfs, stopGracePeriod, shmSize, devices, privileged, internetAccess };
 
-    await saveContainer(dbId, name, config, 'running', container.id, existingNode);
+      await checkPrivilegedAllowed(privileged);
 
-    await container.start();
-    await ensureNetworkConnections(group, container.id);
+      // Stop old container but do NOT remove it yet
+      await withTimeout(container.stop(), CONTAINER_OP_TIMEOUT, 'Container stop timed out');
 
-    if (proxy.enabled && proxy.uri && proxy.port) {
-      await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
-    }
+      let newContainer;
+      try {
+        await ensureImage(image);
 
-    res.json({ message: 'Container updated successfully', id: container.id, db_id: dbId });
+        const createOpts = await buildCreateOpts(name, image, env, volumes, ports, restartPolicy, resources, { tmpfs, stopGracePeriod, shmSize, devices, privileged });
+        newContainer = await withTimeout(docker.createContainer(createOpts), CONTAINER_OP_TIMEOUT, 'Container creation timed out');
+
+        try {
+          if (dbContainer && oldName !== name) {
+            await deleteContainer(dbContainer.id).catch(() => {});
+          }
+
+          await saveContainer(dbId, name, config, 'running', newContainer.id, existingNode);
+
+          // Now safe to remove old container
+          await container.remove({ force: true }).catch(() => {});
+          await removeRoute(oldName).catch(() => {});
+
+          await withTimeout(newContainer.start(), CONTAINER_OP_TIMEOUT, 'Container start timed out');
+          await ensureNetworkConnections(newContainer.id, group, internetAccess, name);
+
+          if (proxy.enabled && proxy.uri && proxy.port) {
+            await addRoute(name, proxy.uri, proxy.port, proxy.domain, proxy.sslCert, proxy.sslKey);
+          }
+
+          res.json({ message: 'Container updated successfully', id: newContainer.id, db_id: dbId });
+        } catch (err) {
+          // Rollback: remove new container, restart old, restore etcd
+          await newContainer.remove({ force: true }).catch(() => {});
+          try {
+            await docker.getContainer(rollback.dockerId).start();
+          } catch (e) {}
+          if (rollback.dbRecord) {
+            await saveContainer(rollback.dbId, rollback.dbRecord.name, rollback.dbRecord.config, rollback.dbRecord.status, rollback.dockerId, rollback.dbRecord.current_node).catch(() => {});
+          }
+          throw err;
+        }
+      } catch (err) {
+        // Rollback: restart old container (no new container was created)
+        try {
+          await docker.getContainer(rollback.dockerId).start();
+        } catch (e) {
+          console.error(`[Rollback] Failed to restart old container ${rollback.oldName}:`, e.message);
+        }
+        throw err;
+      }
+    });
   } catch (error) {
+    if (error.status === 403) return res.status(403).json({ error: error.message, code: error.code });
+    if (error.status === 404) return res.status(404).json({ error: error.message, code: error.code });
     res.status(500).json({ error: 'Failed to update container', details: error.message, code: 'CONTAINER_UPDATE_FAILED' });
   }
 });
@@ -276,7 +319,7 @@ router.post('/:id/persist', async (req, res) => {
         try {
           await fs.mkdir(newHostPath, { recursive: true });
           await fs.cp(oldHost, newHostPath, { recursive: true });
-        } catch(e) {
+        } catch (e) {
           console.error(`Error copying volume ${oldHost}:`, e);
         }
 
@@ -295,7 +338,7 @@ router.post('/:id/persist', async (req, res) => {
           try {
             await fs.mkdir(newHostPath, { recursive: true });
             await fs.cp(m.Source, newHostPath, { recursive: true });
-          } catch(e) {
+          } catch (e) {
             console.error(`Error copying volume ${m.Source}:`, e);
           }
 
@@ -340,20 +383,44 @@ router.post('/:id/persist', async (req, res) => {
       shmSize: '',
       devices: '',
       privileged: false,
+      internetAccess: false,
     };
 
-    await container.stop();
-    await container.remove();
+    // Save old container id for rollback
+    const oldContainerId = container.id;
+
+    await withTimeout(container.stop(), CONTAINER_OP_TIMEOUT, 'Container stop timed out');
+    await withTimeout(container.remove({ force: true }), CONTAINER_OP_TIMEOUT, 'Container remove timed out');
 
     const containerId = uuidv4();
-    await saveContainer(containerId, name, config, 'running');
 
-    const createOpts = await buildCreateOpts(name, config.image, env, volumes, ports, config.restartPolicy, resources, config);
-    const newContainer = await docker.createContainer(createOpts);
-    await saveContainer(containerId, name, config, 'running', newContainer.id);
-    await newContainer.start();
+    try {
+      await saveContainer(containerId, name, config, 'running');
 
-    res.json({ message: 'Container migrated successfully', db_id: containerId });
+      const createOpts = await buildCreateOpts(name, config.image, env, volumes, ports, config.restartPolicy, resources, config);
+      const newContainer = await withTimeout(docker.createContainer(createOpts), CONTAINER_OP_TIMEOUT, 'Container creation timed out');
+
+      try {
+        await saveContainer(containerId, name, config, 'running', newContainer.id);
+        await withTimeout(newContainer.start(), CONTAINER_OP_TIMEOUT, 'Container start timed out');
+        await ensureNetworkConnections(newContainer.id, '', false, name);
+
+        res.json({ message: 'Container migrated successfully', db_id: containerId });
+      } catch (err) {
+        await newContainer.remove({ force: true }).catch(() => {});
+        throw err;
+      }
+    } catch (err) {
+      // Rollback: try to recreate the original container
+      try {
+        const restoreOpts = await buildCreateOpts(name, inspect.Config.Image, env, [], ports, inspect.HostConfig.RestartPolicy.Name || 'unless-stopped', resources, config);
+        const restored = await docker.createContainer(restoreOpts);
+        await restored.start();
+      } catch (restoreErr) {
+        console.error(`[Rollback] Failed to restore container ${name}:`, restoreErr.message);
+      }
+      throw err;
+    }
   } catch (error) {
     res.status(500).json({ error: 'Failed to persist container', details: error.message, code: 'PERSIST_FAILED' });
   }
@@ -371,20 +438,40 @@ router.delete('/:id', async (req, res) => {
     const proxied = await proxyToNode(dbContainer?.current_node, req, res);
     if (proxied !== false) return;
 
-    const container = docker.getContainer(id);
-    const inspect = await container.inspect();
-    const name = inspect.Name.replace(/^\//, '');
+    await withContainerLock(id, async () => {
+      const container = docker.getContainer(id);
+      let inspect;
+      try {
+        inspect = await withTimeout(container.inspect(), CONTAINER_OP_TIMEOUT, 'Container inspect timed out');
+      } catch (e) {
+        // Container already gone — clean up etcd record and return success
+        if (dbContainer) {
+          await deleteContainer(dbContainer.id).catch(() => {});
+        }
+        await removeRoute(id).catch(() => {});
+        await removeContainerNetworks(id).catch(() => {});
+        return res.json({ message: 'Container was already removed' });
+      }
 
-    await container.stop();
-    await container.remove();
+      const name = inspect.Name.replace(/^\//, '');
 
-    if (dbContainer) {
-      await deleteContainer(dbContainer.id);
-    }
+      await withTimeout(container.stop(), CONTAINER_OP_TIMEOUT, 'Container stop timed out');
+      await withTimeout(container.remove({ force: true }), CONTAINER_OP_TIMEOUT, 'Container remove timed out');
 
-    await removeRoute(name);
+      // Best-effort cleanup — don't fail if etcd/route/network removal fails
+      const errors = [];
+      if (dbContainer) {
+        try { await deleteContainer(dbContainer.id); } catch (e) { errors.push(`etcd: ${e.message}`); }
+      }
+      try { await removeRoute(name); } catch (e) { errors.push(`route: ${e.message}`); }
+      try { await removeContainerNetworks(id); } catch (e) { errors.push(`network: ${e.message}`); }
 
-    res.json({ message: 'Container removed successfully' });
+      if (errors.length > 0) {
+        console.warn(`[Container] Delete cleanup warnings for ${name}: ${errors.join(', ')}`);
+      }
+
+      res.json({ message: 'Container removed successfully' });
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to remove container', details: error.message, code: 'CONTAINER_DELETE_FAILED' });
   }
@@ -423,6 +510,7 @@ router.get('/', async (req, res) => {
         NetworkSettings: liveData?.NetworkSettings || { Networks: {} },
         isPersisted: true,
         persistedConfig: dbC.config,
+        internetAccess: dbC.config?.internetAccess || false,
         current_node: dbC.current_node,
       };
     }));

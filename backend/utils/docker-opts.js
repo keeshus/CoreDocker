@@ -67,7 +67,6 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
       PortBindings,
       Memory: resources?.memory ? resources.memory * 1024 * 1024 : 0,
       NanoCPUs: resources?.cpu ? resources.cpu * 1000000000 : 0,
-      NetworkMode: 'web-proxy',
       Privileged: opts.privileged || false,
     },
   };

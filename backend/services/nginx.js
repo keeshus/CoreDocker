@@ -108,7 +108,7 @@ export async function reloadNginx() {
         const containers = await docker.listContainers({
             filters: { name: ['^/core-docker-proxy$'] }
         });
-        
+
         if (containers.length > 0) {
             const nginxContainer = docker.getContainer(containers[0].Id);
             const exec = await nginxContainer.exec({
@@ -121,6 +121,33 @@ export async function reloadNginx() {
         }
     } catch (error) {
         console.error('Failed to reload Nginx:', error);
+    }
+}
+
+/**
+ * Connect the nginx proxy container to a Docker network if not already connected.
+ */
+export async function connectNginxToNetwork(networkName) {
+    try {
+        const containers = await docker.listContainers({
+            filters: { name: ['^/core-docker-proxy$'] }
+        });
+        if (containers.length === 0) return;
+
+        const nginxContainer = docker.getContainer(containers[0].Id);
+        const info = await nginxContainer.inspect();
+        const connectedNetworks = info.NetworkSettings?.Networks || {};
+
+        if (connectedNetworks[networkName]) {
+            return; // Already connected
+        }
+
+        const network = docker.getNetwork(networkName);
+        await network.connect({ Container: containers[0].Id });
+        console.log(`[NGINX] Connected to network: ${networkName}`);
+    } catch (error) {
+        if (error.statusCode === 404) return; // Network doesn't exist yet
+        console.error(`[NGINX] Failed to connect to network ${networkName}:`, error.message);
     }
 }
 

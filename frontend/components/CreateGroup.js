@@ -10,7 +10,8 @@ export default function CreateGroup({ onCreated, initialData = null, onClose = n
     name: '',
     config: {
       highAvailability: false,
-      targetNodes: []
+      targetNodes: [],
+      internetAccess: false
     }
   };
 
@@ -97,6 +98,16 @@ export default function CreateGroup({ onCreated, initialData = null, onClose = n
               <div>
                 <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Group Name</label>
                 <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={{ width: '100%', padding: '8px' }} placeholder="web-stack" />
+              </div>
+
+              <div style={{ padding: '10px', background: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                <label style={{ display: 'flex', alignItems: 'center', fontWeight: 'bold', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={formData.config.internetAccess} onChange={e => setFormData({...formData, config: {...formData.config, internetAccess: e.target.checked}})} style={{ marginRight: '10px' }} />
+                  Internet connected
+                </label>
+                <p style={{ margin: '5px 0 10px 25px', fontSize: '0.85em', color: '#64748b' }}>
+                  When unchecked, containers in this group share an isolated network without external internet access. Individual containers can override this.
+                </p>
               </div>
 
               <div style={{ padding: '10px', background: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>

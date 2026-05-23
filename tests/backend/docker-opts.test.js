@@ -223,8 +223,8 @@ describe('buildCreateOpts - privileged', () => {
 });
 
 describe('buildCreateOpts - network mode', () => {
-  it('sets NetworkMode to web-proxy', async () => {
+  it('does not set NetworkMode (networks attached post-create by network-manager)', async () => {
     const result = await buildCreateOpts('app', 'node:18', [], [], [], 'always', {});
-    expect(result.HostConfig.NetworkMode).toBe('web-proxy');
+    expect(result.HostConfig.NetworkMode).toBeUndefined();
   });
 });
