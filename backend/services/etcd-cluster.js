@@ -264,10 +264,32 @@ export const bootstrapEtcd = async () => {
 
     // Enable etcd authentication on first bootstrap (not on restart from config)
     if (!clusterConfig) {
-      const rootUser = crypto.randomBytes(16).toString('hex');
       const rootPass = crypto.randomBytes(32).toString('hex');
 
-      // Wait for etcd to be ready, then set up auth
+      // Wait for etcd to be ready before running auth commands.
+      // etcdctl hangs if the server isn't accepting requests yet.
+      for (let i = 0; i < 30; i++) {
+        try {
+          const readyExec = await newContainer.exec({
+            Cmd: ['etcdctl', 'endpoint', 'health'],
+            AttachStdout: true, AttachStderr: true,
+          });
+          const ready = await new Promise((resolve) => {
+            readyExec.start(async (err, stream) => {
+              if (err) { resolve(false); return; }
+              stream.on('end', async () => {
+                const insp = await readyExec.inspect();
+                resolve(insp.ExitCode === 0);
+              });
+            });
+          });
+          if (ready) break;
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      console.log('[ETCD] Ready, setting up authentication...');
+
+      // Set up auth
       for (let i = 0; i < 10; i++) {
         try {
           const addExec = await newContainer.exec({
@@ -305,7 +327,7 @@ export const bootstrapEtcd = async () => {
           const authPath = `${process.env.HOST_BACKUP_PATH || '/data/backup'}/${SYSTEM_NAMESPACE}/etcd/auth.json`;
           const dir = path.dirname(authPath);
           if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(authPath, JSON.stringify({ username: rootUser, password: rootPass }, null, 2));
+          fs.writeFileSync(authPath, JSON.stringify({ username: 'root', password: rootPass }, null, 2));
           console.log('[ETCD] Authentication enabled.');
           break;
         } catch (e) {
