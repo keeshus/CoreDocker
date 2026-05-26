@@ -9,6 +9,29 @@ const CONTAINER_NAME = 'core-docker-etcd';
 const CLUSTER_CONFIG_FILE = `${SYSTEM_NAMESPACE}/etcd/cluster-config.json`;
 
 /**
+ * Run a command inside the etcd container via Docker exec with a timeout.
+ * Resolves true if exit code is 0, false on non-zero, throws on timeout/error.
+ */
+async function execWithTimeout(container, cmd, timeoutMs = 20000) {
+  const exec = await container.exec({ Cmd: cmd, AttachStdout: true, AttachStderr: true });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Exec timed out after ${timeoutMs}ms: ${cmd.join(' ')}`)), timeoutMs);
+    exec.start(async (err, stream) => {
+      if (err) { clearTimeout(timer); reject(err); return; }
+      stream.on('end', async () => {
+        clearTimeout(timer);
+        try {
+          const insp = await exec.inspect();
+          resolve(insp.ExitCode === 0);
+        } catch (inspectErr) {
+          resolve(false);
+        }
+      });
+    });
+  });
+}
+
+/**
  * Parse `etcdctl member add` output to extract cluster join info.
  * Expected output format:
  *   Member <id> added to cluster <cluster-id>
@@ -267,61 +290,23 @@ export const bootstrapEtcd = async () => {
       const rootPass = crypto.randomBytes(32).toString('hex');
 
       // Wait for etcd to be ready before running auth commands.
-      // etcdctl hangs if the server isn't accepting requests yet.
+      // Docker exec hangs if the target command doesn't exit, so all
+      // exec calls use execWithTimeout to ensure forward progress.
       for (let i = 0; i < 30; i++) {
         try {
-          const readyExec = await newContainer.exec({
-            Cmd: ['etcdctl', 'endpoint', 'health'],
-            AttachStdout: true, AttachStderr: true,
-          });
-          const ready = await new Promise((resolve) => {
-            readyExec.start(async (err, stream) => {
-              if (err) { resolve(false); return; }
-              stream.on('end', async () => {
-                const insp = await readyExec.inspect();
-                resolve(insp.ExitCode === 0);
-              });
-            });
-          });
+          const ready = await execWithTimeout(newContainer, ['etcdctl', 'endpoint', 'health'], 5000);
           if (ready) break;
         } catch (e) {}
         await new Promise(r => setTimeout(r, 1000));
       }
       console.log('[ETCD] Ready, setting up authentication...');
 
-      // Set up auth
       for (let i = 0; i < 10; i++) {
         try {
-          const addExec = await newContainer.exec({
-            Cmd: ['etcdctl', 'user', 'add', `root:${rootPass}`],
-            AttachStdout: true, AttachStderr: true,
-          });
-          const addResult = await new Promise((resolve) => {
-            addExec.start(async (err, stream) => {
-              if (err) { resolve(false); return; }
-              let data = '';
-              stream.on('data', c => data += c.toString());
-              stream.on('end', async () => {
-                const insp = await addExec.inspect();
-                resolve(insp.ExitCode === 0);
-              });
-            });
-          });
+          const addResult = await execWithTimeout(newContainer, ['etcdctl', 'user', 'add', `root:${rootPass}`]);
           if (!addResult) { await new Promise(r => setTimeout(r, 1000)); continue; }
 
-          const enableExec = await newContainer.exec({
-            Cmd: ['etcdctl', 'auth', 'enable'],
-            AttachStdout: true, AttachStderr: true,
-          });
-          await new Promise((resolve) => {
-            enableExec.start(async (err, stream) => {
-              if (err) { resolve(false); return; }
-              stream.on('end', async () => {
-                const insp = await enableExec.inspect();
-                resolve(insp.ExitCode === 0);
-              });
-            });
-          });
+          await execWithTimeout(newContainer, ['etcdctl', 'auth', 'enable']);
 
           // Save credentials
           const authPath = `${process.env.HOST_BACKUP_PATH || '/data/backup'}/${SYSTEM_NAMESPACE}/etcd/auth.json`;
