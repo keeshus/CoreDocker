@@ -18,6 +18,9 @@ async function execWithTimeout(container, cmd, timeoutMs = 20000) {
     const timer = setTimeout(() => reject(new Error(`Exec timed out after ${timeoutMs}ms: ${cmd.join(' ')}`)), timeoutMs);
     exec.start(async (err, stream) => {
       if (err) { clearTimeout(timer); reject(err); return; }
+      // Drain stream data to prevent backpressure — the 'end' event won't fire
+      // if the stream buffer isn't consumed.
+      stream.on('data', () => {});
       stream.on('end', async () => {
         clearTimeout(timer);
         try {
@@ -304,22 +307,31 @@ export const bootstrapEtcd = async () => {
 
       for (let i = 0; i < 10; i++) {
         try {
-          const addResult = await execWithTimeout(newContainer, ['etcdctl', 'user', 'add', `root:${rootPass}`]);
-          if (!addResult) { await new Promise(r => setTimeout(r, 1000)); continue; }
-
-          await execWithTimeout(newContainer, ['etcdctl', 'auth', 'enable']);
-
-          // Save credentials
-          const authPath = `${process.env.HOST_BACKUP_PATH || '/data/backup'}/${SYSTEM_NAMESPACE}/etcd/auth.json`;
-          const dir = path.dirname(authPath);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(authPath, JSON.stringify({ username: 'root', password: rootPass }, null, 2));
-          console.log('[ETCD] Authentication enabled.');
-          break;
+          // Attempt to add root user — fails harmlessly if already exists
+          await execWithTimeout(newContainer, ['etcdctl', 'user', 'add', `root:${rootPass}`]);
         } catch (e) {
+          // Timeout — etcd might not be ready yet
           console.log(`[ETCD] Waiting for etcd readiness (auth setup)... ${e.message}`);
           await new Promise(r => setTimeout(r, 1000));
+          continue;
         }
+
+        // Enable authentication (idempotent — safe to call even if user already exists)
+        try {
+          await execWithTimeout(newContainer, ['etcdctl', 'auth', 'enable']);
+        } catch (e) {
+          console.log(`[ETCD] Waiting for etcd readiness (auth enable)... ${e.message}`);
+          await new Promise(r => setTimeout(r, 1000));
+          continue;
+        }
+
+        // Save credentials
+        const authPath = `${process.env.HOST_BACKUP_PATH || '/data/backup'}/${SYSTEM_NAMESPACE}/etcd/auth.json`;
+        const dir = path.dirname(authPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(authPath, JSON.stringify({ username: 'root', password: rootPass }, null, 2));
+        console.log('[ETCD] Authentication enabled.');
+        break;
       }
     }
 
