@@ -192,10 +192,10 @@ export async function bootstrapNginx() {
     await runEphemeralTask('alpine', [
         'sh', '-c',
         `apk add --no-cache openssl && \
-         mkdir -p ${selfSignedPath} && \
+         mkdir -p /data/backup/${SYSTEM_NAMESPACE}/nginx/ssl/host && \
          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-         -keyout ${selfSignedPath}/privkey.pem \
-         -out ${selfSignedPath}/fullchain.pem \
+         -keyout /data/backup/${SYSTEM_NAMESPACE}/nginx/ssl/host/privkey.pem \
+         -out /data/backup/${SYSTEM_NAMESPACE}/nginx/ssl/host/fullchain.pem \
          -subj "/CN=${nodeName}.local"`
     ]);
 
@@ -243,8 +243,6 @@ server {
     }
 }
 `;
-    await writeFileToHost(`${NGINX_CONF_DIR}/default.conf`, defaultConfContent.trimStart());
-
     await docker.createContainer({
         Image: NGINX_IMAGE,
         name: CONTAINER_NAME,
@@ -267,6 +265,37 @@ server {
             }
         }
     }).then(container => container.start());
-    
+
+    // Write config into the container via Docker exec (bind mount path resolution
+    // differs between rootless Docker and compose-managed mounts).
+    const b64Config = Buffer.from(defaultConfContent.trimStart()).toString('base64');
+    const nginxContainer = docker.getContainer(CONTAINER_NAME);
+    const writeExec = await nginxContainer.exec({
+        Cmd: ['sh', '-c', `echo ${b64Config} | base64 -d > /etc/nginx/conf.d/default.conf`],
+        AttachStdout: true,
+        AttachStderr: true
+    });
+    await new Promise((resolve, reject) => {
+        writeExec.start((err, stream) => {
+            if (err) { reject(err); return; }
+            stream.on('end', resolve);
+            stream.resume();
+        });
+    });
+
+    // Reload nginx to pick up the new config
+    const reloadExec = await nginxContainer.exec({
+        Cmd: ['nginx', '-s', 'reload'],
+        AttachStdout: true,
+        AttachStderr: true
+    });
+    await new Promise((resolve, reject) => {
+        reloadExec.start((err, stream) => {
+            if (err) { reject(err); return; }
+            stream.on('end', resolve);
+            stream.resume();
+        });
+    });
+
     logEvent('nginx', 'info', 'Dynamic Nginx proxy successfully bootstrapped.');
 }
