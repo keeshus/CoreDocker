@@ -221,7 +221,21 @@ export async function bootstrapNginx() {
     const defaultConfContent = `
 server {
     listen 80;
-    return 301 https://$host$request_uri;
+
+    resolver 127.0.0.11 valid=30s;
+
+    # Proxy API requests directly (health check, status, etc.)
+    location /api/ {
+        proxy_pass http://core-docker-backend:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 
 server {
