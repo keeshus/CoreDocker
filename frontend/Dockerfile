@@ -39,5 +39,9 @@ USER nodejs
 
 EXPOSE 3000
 
+# Health check using BusyBox wget (available in node:alpine)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD wget --spider -q http://127.0.0.1:3000/ || exit 1
+
 # Run frontend production server using the workspace script
 CMD ["npm", "run", "start", "-w", "@core-docker/frontend"]

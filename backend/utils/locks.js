@@ -1,21 +1,25 @@
-import etcd from '../services/db.js';
+import { etcd } from '../services/db.js';
+import { nodeId } from '../config.js';
 
-const nodeId = process.env.NODE_ID || 'master';
 const LOCKS_PREFIX = 'locks/container/';
 
 export async function withContainerLock(containerId, callback) {
   const lockKey = `${LOCKS_PREFIX}${containerId}`;
   const lease = etcd.lease(120);
+  let acquired = false;
   try {
-    const success = await etcd.put(lockKey).value(nodeId).lease(lease).ifAbsent();
-    if (!success) {
-      await lease.revoke();
-      throw new Error(`Container ${containerId} is being modified by another operation`);
-    }
+    // Atomic compare-and-swap: only create the lock key if it doesn't exist.
+    // The non-atomic get-then-put pattern has a TOCTOU race where two
+    // concurrent callers can both see no lock and both acquire it.
+    await etcd.if(lockKey, 'Create', '==', 0)
+      .then(lease.put(lockKey).value(nodeId))
+      .else(() => { throw new Error(`Container ${containerId} is being modified by another operation`); })
+      .commit();
+    acquired = true;
     return await callback();
   } finally {
-    try { await lease.revoke(); } catch (e) {
-      console.warn(`[Locks] Failed to revoke lease for ${containerId}: ${e.message}`);
+    if (acquired) {
+      await lease.revoke().catch(() => {});
     }
   }
 }

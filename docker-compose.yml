@@ -4,6 +4,9 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 100
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_CERTS_PATH:-./nginx/ssl}:/etc/certs:ro
@@ -14,12 +17,12 @@ services:
       - NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.25.4-alpine}
       - ALPINE_IMAGE=${ALPINE_IMAGE:-alpine:3.19}
       - DNS_FORWARDER=${DNS_FORWARDER:-192.168.1.1}
-      - NODE_DOMAIN=${NODE_DOMAIN:-node-1.local}
       - NODE_IP=${NODE_IP:-127.0.0.1}
       - NODE_CLIENT_IP=${NODE_CLIENT_IP}
-      - HOST_BACKUP_PATH=/mnt/backup
-      - HOST_NONBACKUP_PATH=/mnt/non-backup
-      - NODE_ID=${NODE_ID}
+      - COMPOSE_PROJECT_DIR=${PWD}
+      - HOST_BACKUP_PATH=${HOST_BACKUP_PATH:-/mnt/backup}
+      - HOST_NONBACKUP_PATH=${HOST_NONBACKUP_PATH:-/mnt/non-backup}
+      - DNS_PRODUCTION=${DNS_PRODUCTION:-false}
       - NODE_NAME=${NODE_NAME:-node-1}
       - PORT=${PORT:-3000}
       - CORS_ORIGIN=${CORS_ORIGIN:-true}
@@ -45,6 +48,9 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 50
     user: nodejs
     depends_on:
       - backend

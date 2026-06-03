@@ -1,4 +1,4 @@
-import etcd from './db.js';
+import { etcd } from './db.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { logEvent } from './logger.js';
@@ -19,6 +19,19 @@ export const isSystemInitialized = async () => {
 
 export const isNodeSealed = () => {
   return inMemoryDEK === null;
+};
+
+export const verifyMasterPassword = async (password) => {
+  const storedHashPayload = await etcd.get(MASTER_KEY_HASH_KEY).string();
+  if (!storedHashPayload) {
+    throw new Error('System not initialized');
+  }
+  const [salt, storedHash] = storedHashPayload.split(':');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  if (hash !== storedHash) {
+    throw new Error('Invalid master password');
+  }
+  return true;
 };
 
 export const validatePasswordStrength = (password) => {
@@ -299,5 +312,7 @@ export const deleteSecret = async (key) => {
 
 export const getAllSecretKeys = async () => {
   const secrets = await etcd.getAll().prefix(SECRETS_PREFIX).keys();
-  return secrets.map(key => key.replace(SECRETS_PREFIX, ''));
+  return secrets
+    .map(key => key.replace(SECRETS_PREFIX, ''))
+    .filter(key => !key.startsWith('__system__/'));
 };

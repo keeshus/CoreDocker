@@ -18,12 +18,19 @@ export default function CreateGroup({ onCreated, initialData = null, onClose = n
   const [formData, setFormData] = useState(defaultFormData);
   const [nodes, setNodes] = useState([]);
 
-  useEffect(() => {
+  const fetchNodes = () =>
     fetch('/api/nodes')
       .then(res => res.json())
       .then(data => setNodes(data || []))
       .catch(err => console.error('Failed to fetch nodes:', err));
+
+  useEffect(() => {
+    fetchNodes();
   }, []);
+
+  useEffect(() => {
+    if (isOpen) fetchNodes();
+  }, [isOpen]);
 
   useEffect(() => {
     if (initialData) {

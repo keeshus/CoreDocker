@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import ContainerRow from './ContainerRow';
-import { filterContainersByNode } from '../lib/domain-logic';
 
 export default function NodeSettings({ systemContainers = [], stats = {} }) {
   const [nodes, setNodes] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [loadingNodes, setLoadingNodes] = useState(true);
   const [expandedContainer, setExpandedContainer] = useState(null);
+  const [remoteContainers, setRemoteContainers] = useState([]);
+  const [loadingContainers, setLoadingContainers] = useState(false);
 
   useEffect(() => {
     fetch('/api/nodes')
@@ -24,11 +25,31 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
       });
   }, []);
 
+  // Fetch containers for the selected node (remote nodes need a proxied request)
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const selectedNode = nodes.find(n => n.id === selectedNodeId);
+    if (!selectedNode) return;
+
+    // For the local node, use the prop data (already available)
+    // For remote nodes, fetch from the proxied API
+    setLoadingContainers(true);
+    fetch(`/api/containers?node=${selectedNodeId}`)
+      .then(res => res.json())
+      .then(data => {
+        const system = data.filter(c =>
+          (c.Names?.[0] || '').startsWith('/core-docker-')
+        );
+        setRemoteContainers(system);
+        setLoadingContainers(false);
+      })
+      .catch(() => setLoadingContainers(false));
+  }, [selectedNodeId, nodes]);
+
   if (loadingNodes) return <div>Loading nodes...</div>;
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
-  
-  const filteredSystemContainers = filterContainersByNode(systemContainers, selectedNode);
+  const containers = remoteContainers.length > 0 ? remoteContainers : systemContainers;
 
   return (
     <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -37,8 +58,8 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
 
       <div style={{ marginBottom: '20px' }}>
         <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Select Node</label>
-        <select 
-          value={selectedNodeId} 
+        <select
+          value={selectedNodeId}
           onChange={e => setSelectedNodeId(e.target.value)}
           style={{ width: '100%', maxWidth: '400px', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
         >
@@ -63,8 +84,10 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
           <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
             <h3 style={{ marginTop: 0 }}>System Containers on {selectedNode?.name}</h3>
             <p style={{ color: '#64748b', fontSize: '0.9em' }}>Monitor core application containers running on this node.</p>
-            
-            {filteredSystemContainers.length > 0 ? (
+
+            {loadingContainers ? (
+              <p style={{ color: '#94a3b8', marginTop: '15px' }}>Loading containers...</p>
+            ) : containers.length > 0 ? (
               <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '15px', background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
                 <thead>
                   <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em', background: '#f8fafc' }}>
@@ -77,7 +100,7 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredSystemContainers.map(c => (
+                  {containers.map(c => (
                     <ContainerRow
                       key={c.Id}
                       container={c}

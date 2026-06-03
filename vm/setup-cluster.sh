@@ -179,7 +179,7 @@ PYEOF
 # 5. Generate cloud-init ISO for a node
 # ════════════════════════════════════════════════════════
 generate_cloud_init() {
-  local node_name="$1" public_ip="$2" backhaul_ip="$3"
+  local node_name="$1" public_ip="$2" backhaul_ip="$3" public_mac="$4" backhaul_mac="$5"
   local iso_dir="$SCRIPT_DIR/cloud-init-build/$node_name"
   local iso_file="$SCRIPT_DIR/cloud-init-build/${node_name}-seed.iso"
   mkdir -p "$iso_dir"
@@ -189,14 +189,14 @@ generate_cloud_init() {
   # meta-data
   printf 'instance-id: %s\nlocal-hostname: %s\n' "$node_name" "$node_name" > "$iso_dir/meta-data"
 
-  # network-config (public + backhaul interfaces, matched by driver order)
+  # network-config — match by MAC to avoid ambiguity between the two virtio NICs
   cat > "$iso_dir/network-config" << NETCFG
 version: 2
 ethernets:
-  # Public interface (first NIC — 1Gb client network)
-  id0:
+  # Public interface (1Gb client network with NAT + DNS)
+  public:
     match:
-      driver: virtio_net
+      macaddress: ${public_mac}
     dhcp4: false
     addresses:
       - ${public_ip}/24
@@ -207,10 +207,10 @@ ethernets:
         - 8.8.8.8
     search:
       - ${DOMAIN}
-  # Backhaul interface (second NIC — 2.5Gb cluster-internal network)
-  id1:
+  # Backhaul interface (2.5Gb cluster-internal, isolated — no gateway)
+  backhaul:
     match:
-      driver: virtio_net
+      macaddress: ${backhaul_mac}
     dhcp4: false
     addresses:
       - ${backhaul_ip}/24
@@ -411,7 +411,7 @@ main() {
   for node_def in "${NODES[@]}"; do
     IFS='|' read -r name ip bh_ip mac bh_mac is_first <<< "$node_def"
     log "  $name (public=$ip, backhaul=$bh_ip)"
-    local iso; iso="$(generate_cloud_init "$name" "$ip" "$bh_ip")"
+    local iso; iso="$(generate_cloud_init "$name" "$ip" "$bh_ip" "$mac" "$bh_mac")"
     seed_isos+=("$iso|$name|$ip|$bh_ip|$mac|$bh_mac|$is_first")
   done
 

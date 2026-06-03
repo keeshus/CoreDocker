@@ -1,9 +1,9 @@
 import express from 'express';
 import docker from '../services/docker.js';
-import etcd from '../services/db.js';
+import { etcd, saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig, getContainers, getNodes } from '../services/db.js';
 import { ensureContainerNetworks, removeContainerNetworks } from '../services/network-manager.js';
 import { addRoute, removeRoute, getNodeUrl } from '../services/nginx.js';
-import { saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig, getContainers, getNodes } from '../services/db.js';
+import { nodeId as localNodeId } from '../config.js';
 import { generateClusterToken } from '../services/secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
 import { withTimeout } from '../utils/timeout.js';
@@ -68,11 +68,11 @@ async function checkPrivilegedAllowed(privileged) {
 
 const proxyToNode = async (nodeId, req, res) => {
   const targetNodeId = nodeId || 'master';
-  if (targetNodeId !== (process.env.NODE_ID || 'master')) {
+  if (targetNodeId !== localNodeId) {
     const nodes = await getNodes();
     const node = nodes.find(n => n.id === targetNodeId);
     if (node) {
-      const token = generateClusterToken({ node: process.env.NODE_ID });
+      const token = generateClusterToken({ node: localNodeId });
       const url = `${getNodeUrl(node.ip)}${req.originalUrl}`;
 
       const options = {
@@ -129,9 +129,9 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Memory and CPU limits are mandatory.', code: 'VALIDATION_ERROR' });
     }
 
-    const nodeId = req.body.current_node || process.env.NODE_ID || 'master';
+    const targetNode = req.body.current_node || localNodeId;
 
-    const proxied = await proxyToNode(nodeId, req, res);
+    const proxied = await proxyToNode(targetNode, req, res);
     if (proxied !== false) return;
 
     const containerId = uuidv4();
@@ -200,7 +200,7 @@ router.put('/:id', async (req, res) => {
     const proxied = await proxyToNode(dbC?.current_node, req, res);
     if (proxied !== false) return;
 
-    const existingNode = process.env.NODE_ID || 'master';
+    const existingNode = localNodeId;
 
     await withContainerLock(id, async () => {
       let container = docker.getContainer(id);
@@ -312,8 +312,7 @@ router.post('/:id/persist', async (req, res) => {
         const containerPath = parts[1];
 
         const folderName = containerPath.replace(/^\//, '').replace(/\//g, '_');
-        const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
-        const newHostPath = `${backupPath}/${name}/${folderName}`;
+        const newHostPath = `/mnt/backup/${name}/${folderName}`;
 
         console.log(`Migrating volume ${oldHost} -> ${newHostPath}`);
         try {
@@ -331,8 +330,7 @@ router.post('/:id/persist', async (req, res) => {
       for (const m of inspect.Mounts) {
         if (m.Type === 'volume' && m.Source) {
           const folderName = m.Destination.replace(/^\//, '').replace(/\//g, '_');
-          const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
-          const newHostPath = `${backupPath}/${name}/${folderName}`;
+          const newHostPath = `/mnt/backup/${name}/${folderName}`;
 
           console.log(`Migrating docker volume ${m.Source} -> ${newHostPath}`);
           try {
@@ -479,12 +477,26 @@ router.delete('/:id', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
+    // If requesting containers from a specific remote node, proxy the request
+    const targetNode = req.query.node;
+    if (targetNode && targetNode !== localNodeId) {
+      const nodes = await getNodes();
+      const node = nodes.find(n => n.id === targetNode);
+      if (node) {
+        const token = generateClusterToken({ node: localNodeId });
+        const url = `${getNodeUrl(node.ip)}/api/containers${req.query.system ? '?system=true' : ''}`;
+        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!resp.ok) return res.status(resp.status).json(await resp.json().catch(() => ({})));
+        return res.json(await resp.json());
+      }
+    }
+
     const dbContainers = await getContainers();
     const localContainers = await docker.listContainers({ all: true });
 
     const enrichedContainers = await Promise.all(dbContainers.map(async (dbC) => {
       let liveData = null;
-      if (dbC.current_node === (process.env.NODE_ID || 'master')) {
+      if (dbC.current_node === (localNodeId)) {
         try {
           const container = docker.getContainer(dbC.docker_id || dbC.name);
           const inspect = await container.inspect();
@@ -520,7 +532,7 @@ router.get('/', async (req, res) => {
         enrichedContainers.push({
           ...local,
           isPersisted: false,
-          current_node: process.env.NODE_ID || 'master',
+          current_node: localNodeId,
         });
       }
     }

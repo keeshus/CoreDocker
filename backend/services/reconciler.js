@@ -1,11 +1,12 @@
+import crypto from 'crypto';
 import docker from './docker.js';
-import { getContainers, updateContainerDockerId, getNodes, getGroups } from './db.js';
+import { etcd, getContainers, updateContainerDockerId, getNodes, getGroups } from './db.js';
 import { addRoute } from './nginx.js';
+import { resolveHostPath } from './ephemeral-tasks.js';
 import { ensureContainerNetworks, ensureGroupNetwork } from './network-manager.js';
 import { isNodeSealed } from './secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
 import { runEphemeralTask } from './ephemeral-tasks.js';
-import etcd from './db.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -72,7 +73,20 @@ const reconcileDNSVIP = async (localNodeId) => {
     }
 
     const priority = 100 - (nodeIndex * 10);
-    const keepalivedPass = process.env.KEEPALIVED_PASSWORD || 'c0r3d0ck3r';
+    // Read keepalived password from etcd (auto-generated at bootstrap, propagated on join).
+    // Env override for testing, otherwise etcd, otherwise warn and generate fallback.
+    let keepalivedPass = process.env.KEEPALIVED_PASSWORD;
+    if (!keepalivedPass) {
+      try {
+        keepalivedPass = await etcd.get('__system__/keepalived/password').string();
+      } catch (e) {
+        console.warn('[Reconciler] Could not read keepalived password from etcd:', e.message);
+      }
+    }
+    if (!keepalivedPass) {
+      keepalivedPass = crypto.randomBytes(16).toString('hex');
+      console.warn('[Reconciler] Generated fallback keepalived password — cluster nodes may not match!');
+    }
     const config = `
 vrrp_instance VI_DNS {
     state ${nodeIndex === 0 ? 'MASTER' : 'BACKUP'}
@@ -118,11 +132,20 @@ vrrp_instance VI_DNS {
       await container.start();
     }
 
-    await container.exec({
-      Cmd: ['sh', '-c', `echo "${config.replace(/"/g, '\\"')}" > /etc/keepalived/keepalived.conf && pkill -HUP keepalived`],
+    // Write config via base64 to avoid shell injection through config values.
+    // Drain the exec stream to prevent Docker daemon backpressure.
+    const b64Config = Buffer.from(config).toString('base64');
+    const exec = await container.exec({
+      Cmd: ['sh', '-c', `echo ${b64Config} | base64 -d > /etc/keepalived/keepalived.conf && pkill -HUP keepalived`],
       AttachStdout: true,
       AttachStderr: true
-    }).then(exec => exec.start());
+    });
+    const execStream = await exec.start();
+    execStream.on('data', () => {});
+    await new Promise((resolve, reject) => {
+      execStream.on('end', resolve);
+      execStream.on('error', reject);
+    });
 
   } catch (err) {
     console.error('[Reconciler] DNS VIP reconcile failed:', err.message);
@@ -151,7 +174,7 @@ const reconcileCoreDNS = async (localNodeId) => {
     const sortedNodes = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
     for (const node of sortedNodes) {
       staticEntries += `    hosts {
-        ${node.ip} ${node.id}.core-docker.local
+        ${node.ip} ${node.name}.core-docker.local
         fallthrough
     }\n`;
     }
@@ -162,6 +185,14 @@ const reconcileCoreDNS = async (localNodeId) => {
         ${sortedNodes[0].ip} ${settings.clusterDomain}
         fallthrough
     }\n`;
+      // Also add per-node subdomains so real certs can cover node hostnames
+      // e.g. node-1.cluster.example.com → node-1's IP
+      for (const node of sortedNodes) {
+        staticEntries += `    hosts {
+        ${node.ip} ${node.name}.${settings.clusterDomain}
+        fallthrough
+    }\n`;
+      }
     }
 
     const corefile = `
@@ -182,13 +213,19 @@ ${staticEntries}
     // The backend container's /tmp is tmpfs (container-local only), so using
     // /tmp would write to a path invisible to the Docker host.
     let hostBindSrc;
+    let corefileChanged = false;
     const volumeBase = '/mnt/backup';
     if (fs.existsSync(volumeBase) && process.env.HOST_BACKUP_PATH) {
       const dir = path.join(volumeBase, 'coredns');
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const corefilePath = path.join(dir, 'Corefile');
-      fs.writeFileSync(corefilePath, corefile);
-      hostBindSrc = path.join(process.env.HOST_BACKUP_PATH, 'coredns', 'Corefile');
+      // Check if the Corefile content actually changed before writing
+      const existing = fs.existsSync(corefilePath) ? fs.readFileSync(corefilePath, 'utf8') : null;
+      if (existing !== corefile) {
+        fs.writeFileSync(corefilePath, corefile);
+        corefileChanged = true;
+      }
+      hostBindSrc = path.join(resolveHostPath(process.env.HOST_BACKUP_PATH, '/mnt/backup'), 'coredns', 'Corefile');
     } else {
       // Fallback — may not work in read-only containers without tmpfs
       const dir = '/tmp/coredns';
@@ -197,7 +234,11 @@ ${staticEntries}
       if (fs.existsSync(fp) && fs.lstatSync(fp).isDirectory()) {
         fs.rmdirSync(fp, { recursive: true });
       }
-      fs.writeFileSync(fp, corefile);
+      const existing = fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : null;
+      if (existing !== corefile) {
+        fs.writeFileSync(fp, corefile);
+        corefileChanged = true;
+      }
       hostBindSrc = fp;
     }
 
@@ -260,6 +301,7 @@ ${staticEntries}
     } catch (e) {
       if (e.statusCode === 404) {
         await createContainer();
+        corefileChanged = false; // Just created and started — no reload needed
       }
     }
 
@@ -269,17 +311,20 @@ ${staticEntries}
     if (!inspect.State.Running) {
       try {
         await container.start();
+        corefileChanged = false; // Just started — already reading fresh Corefile
       } catch (startErr) {
         console.error(`[Reconciler] Failed to start CoreDNS: ${startErr.message}. Removing and recreating.`);
         await container.remove({ force: true });
         await createContainer();
       }
     } else {
-      try {
-        await container.kill({ signal: 'SIGHUP' });
-        console.log('[Reconciler] Sent SIGHUP to CoreDNS to reload Corefile');
-      } catch (e) {
-        console.warn(`[Reconciler] Failed to send SIGHUP to CoreDNS: ${e.message}`);
+      if (corefileChanged) {
+        try {
+          await container.kill({ signal: 'SIGHUP' });
+          console.log('[Reconciler] Sent SIGHUP to CoreDNS to reload Corefile');
+        } catch (e) {
+          console.warn(`[Reconciler] Failed to send SIGHUP to CoreDNS: ${e.message}`);
+        }
       }
     }
   } catch (err) {
@@ -431,16 +476,18 @@ export const startReconciler = (localNodeId) => {
     clearInterval(reconcilerInterval);
   }
   console.log('[Reconciler] Starting periodic DNS reconciliation (120s interval)...');
-  reconcilerInterval = setInterval(async () => {
-    try {
-      await reconcileCoreDNS(localNodeId);
-      if (!isNodeSealed()) {
-        await reconcileDNSVIP(localNodeId);
+  reconcilerInterval = setInterval(() => {
+    (async () => {
+      try {
+        await reconcileCoreDNS(localNodeId);
+        if (!isNodeSealed()) {
+          await reconcileDNSVIP(localNodeId);
+        }
+        await reconcileNetworks(localNodeId);
+      } catch (e) {
+        console.error('[Reconciler] Periodic reconciliation error:', e.message);
       }
-      await reconcileNetworks(localNodeId);
-    } catch (e) {
-      console.error('[Reconciler] Periodic reconciliation error:', e.message);
-    }
+    })();
   }, 120000);
 };
 

@@ -21,4 +21,6 @@ vm/noble-server-cloudimg-amd64.img
 vm/repo.tar.gz
 vm/serve.py
 .kilo/
+.claude/
+.qwen/
 data/

@@ -1,3 +1,4 @@
+import { readFileSync, existsSync } from 'fs';
 import docker from './docker.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -7,6 +8,18 @@ const NONBACKUP_MOUNT = '/mnt/non-backup';
 export const SYSTEM_NAMESPACE = '__system__';
 
 const SAFE_PATH_RE = /^[a-zA-Z0-9_\/\-.]+$/;
+
+/**
+ * Resolve the host-side absolute path for a Docker API bind mount source.
+ * If the configured env path is relative, derive it from the compose bind
+ * mount info in /proc/1/mountinfo.
+ */
+export function resolveHostPath(envPath, mountPoint) {
+  if (!envPath || path.isAbsolute(envPath)) return envPath || '/data/backup';
+  // Resolve relative paths against the compose project dir or cwd
+  const base = process.env.COMPOSE_PROJECT_DIR || process.cwd();
+  return path.resolve(base, envPath);
+}
 
 export function validatePath(p) {
   if (p.includes('..')) {
@@ -29,8 +42,8 @@ export async function runEphemeralTask(image, cmd, options = {}) {
       });
     }
 
-    const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
-    const nonBackupPath = process.env.HOST_NONBACKUP_PATH || '/data/non-backup';
+    const backupPath = resolveHostPath(process.env.HOST_BACKUP_PATH, BACKUP_MOUNT);
+    const nonBackupPath = resolveHostPath(process.env.HOST_NONBACKUP_PATH, NONBACKUP_MOUNT);
 
     const defaultHostConfig = {
       Binds: [
@@ -47,20 +60,22 @@ export async function runEphemeralTask(image, cmd, options = {}) {
       ...options
     });
 
-    await container.start();
+    try {
+      await container.start();
+      const result = await container.wait();
+      const logs = await container.logs({ stdout: true, stderr: true });
+      const demuxed = demuxDockerLogs(logs);
 
-    const result = await container.wait();
-
-    const logs = await container.logs({ stdout: true, stderr: true });
-    const demuxed = demuxDockerLogs(logs);
-
-    await container.remove();
-
-    return {
-      stdout: demuxed.stdout,
-      stderr: demuxed.stderr,
-      exitCode: result.StatusCode
-    };
+      return {
+        stdout: demuxed.stdout,
+        stderr: demuxed.stderr,
+        exitCode: result.StatusCode
+      };
+    } finally {
+      await container.remove().catch(e =>
+        console.warn(`[EphemeralTasks] Failed to remove container: ${e.message}`)
+      );
+    }
   } catch (error) {
     console.error(`[EphemeralTasks] Task failed (${image}):`, error.message);
     throw error;

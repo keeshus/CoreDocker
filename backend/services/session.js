@@ -1,4 +1,4 @@
-import etcd from './db.js';
+import { etcd } from './db.js';
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from './secrets.js';
 
@@ -34,7 +34,7 @@ export async function getSessionGeneration(nodeId) {
 }
 
 export async function signToken(payload, secret, expiresIn = '8h') {
-  const jti = `${payload.nodeId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const jti = `${payload.nodeId}-${Date.now()}-${crypto.randomUUID()}`;
   const gen = await getSessionGeneration(payload.nodeId);
   return jwt.sign({ ...payload, jti, gen }, secret, { expiresIn });
 }

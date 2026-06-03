@@ -32,15 +32,20 @@ COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/backend ./backend
 COPY --from=builder --chown=nodejs:nodejs /app/package.json ./package.json
 
-# Create data directory and set permissions
+# Create data directory, install su-exec for privilege dropping
 RUN mkdir -p /app/data && chown nodejs:nodejs /app/data
+RUN apk add --no-cache su-exec
 
-# Entrypoint creates mount subdirectories, then runs the app as root
-# (root inside container maps to host user in rootless Docker)
+# Entrypoint creates mount subdirectories as root, then drops to nodejs
 COPY backend/entrypoint.sh /app/entrypoint.sh
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 EXPOSE 3000
 
-# Run backend from the workspace
+# Health check using BusyBox wget (available in node:alpine)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD wget --spider -q http://127.0.0.1:3000/api/health || exit 1
+
+# Run backend from the workspace as non-root user
+USER nodejs
 CMD ["node", "backend/index.js"]

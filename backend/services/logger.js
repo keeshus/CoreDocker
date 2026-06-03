@@ -1,5 +1,5 @@
 import pino from 'pino';
-import etcd from './db.js';
+import { etcd } from './db.js';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -9,10 +9,10 @@ import { SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_RETENTION_KEY = 'settings/log_retention_days';
 const DEFAULT_RETENTION_DAYS = 7;
-const BACKUP_MOUNT = '/mnt/backup';
+const NONBACKUP_MOUNT = '/mnt/non-backup';
 
 const getLogDir = () => {
-  return path.join(BACKUP_MOUNT, SYSTEM_NAMESPACE, 'logs');
+  return path.join(NONBACKUP_MOUNT, SYSTEM_NAMESPACE, 'logs');
 };
 
 const logDir = getLogDir();
@@ -73,6 +73,7 @@ export async function purgeOldLogs() {
 
   pinoLogger.info({ retentionDays, logDir }, 'Purging old logs');
 
+  // Purge system logs
   try {
     const files = await fsp.readdir(logDir);
     const now = Date.now();
@@ -96,5 +97,49 @@ export async function purgeOldLogs() {
     pinoLogger.info({ purged }, 'Log purge complete');
   } catch (e) {
     pinoLogger.warn({ err: e.message }, 'Log purge directory not found or inaccessible');
+  }
+
+  // Purge task run logs (stored per-task per-node in subdirectories)
+  const taskLogDir = path.join(NONBACKUP_MOUNT, SYSTEM_NAMESPACE, 'tasks');
+  try {
+    const taskDirs = await fsp.readdir(taskLogDir, { withFileTypes: true });
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    let purged = 0;
+
+    for (const taskDirent of taskDirs) {
+      if (!taskDirent.isDirectory()) continue;
+      const taskDirPath = path.join(taskLogDir, taskDirent.name);
+
+      // Each task has per-node subdirectories: tasks/{taskId}/{nodeId}/*.log
+      const nodeDirs = await fsp.readdir(taskDirPath, { withFileTypes: true });
+      for (const nodeDirent of nodeDirs) {
+        if (!nodeDirent.isDirectory()) continue;
+        const nodeDirPath = path.join(taskDirPath, nodeDirent.name);
+        const logFiles = await fsp.readdir(nodeDirPath);
+
+        for (const file of logFiles) {
+          if (!file.endsWith('.log')) continue;
+          const filePath = path.join(nodeDirPath, file);
+          try {
+            const stat = await fsp.stat(filePath);
+            if (stat.mtimeMs < cutoff) {
+              await fsp.unlink(filePath);
+              purged++;
+            }
+          } catch (e) {
+            pinoLogger.warn({ err: e.message, file: filePath }, 'Could not purge task log file');
+          }
+        }
+      }
+    }
+
+    if (purged > 0) {
+      pinoLogger.info({ purged }, 'Task log purge complete');
+    }
+  } catch (e) {
+    // tasks directory may not exist yet — that's fine
+    if (e.code !== 'ENOENT') {
+      pinoLogger.warn({ err: e.message }, 'Task log purge directory not found or inaccessible');
+    }
   }
 }

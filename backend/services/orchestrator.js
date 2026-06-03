@@ -1,5 +1,5 @@
-import etcd from './db.js';
-import { getContainers, getNodes, saveContainer } from './db.js';
+import { etcd, getContainers, getNodes, saveContainer } from './db.js';
+import { withContainerLock } from '../utils/locks.js';
 
 const ORCHESTRATOR_LOCK_KEY = 'leader/orchestrator';
 
@@ -57,17 +57,20 @@ export const runOrchestrationLoop = async () => {
           const targetNode = candidates[0];
           console.log(`[Orchestrator] Moving ${container.name} to Node ${targetNode.id} (${targetNode.ip})`);
 
-          // 3. Update assignment
-          const updatedContainer = { ...container, current_node: targetNode.id };
-          await saveContainer(updatedContainer.id, updatedContainer.name, updatedContainer.config, updatedContainer.status, null, targetNode.id);
-          
-          // 4. Update DNS for CoreDNS (etcd plugin)
-          if (container.config.proxy?.domain) {
-            const dnsKey = `skydns/local/home/${container.name}`;
-            const dnsIp = targetNode.clientIp || targetNode.ip;
-            await etcd.put(dnsKey).value(JSON.stringify({ host: dnsIp }));
-            console.log(`[Orchestrator] Updated DNS: ${container.config.proxy.domain} -> ${dnsIp}`);
-          }
+          // 3. Update assignment under distributed lock to prevent
+          // concurrent reassignment during leadership transitions.
+          await withContainerLock(container.id, async () => {
+            const updatedContainer = { ...container, current_node: targetNode.id };
+            await saveContainer(updatedContainer.id, updatedContainer.name, updatedContainer.config, updatedContainer.status, null, targetNode.id);
+
+            // 4. Update DNS for CoreDNS (etcd plugin)
+            if (container.config.proxy?.domain) {
+              const dnsKey = `skydns/local/home/${container.name}`;
+              const dnsIp = targetNode.clientIp || targetNode.ip;
+              await etcd.put(dnsKey).value(JSON.stringify({ host: dnsIp }));
+              console.log(`[Orchestrator] Updated DNS: ${container.config.proxy.domain} -> ${dnsIp}`);
+            }
+          });
         }
       }
     }
@@ -77,6 +80,7 @@ export const runOrchestrationLoop = async () => {
 };
 
 let orchestratorInterval = null;
+let activeCampaign = null;
 
 export const stopOrchestrator = () => {
   if (orchestratorInterval) {
@@ -84,20 +88,43 @@ export const stopOrchestrator = () => {
     orchestratorInterval = null;
     console.log('[Orchestrator] Stopped.');
   }
+  if (activeCampaign) {
+    try { activeCampaign.cancel(); } catch (e) { /* ignore */ }
+    activeCampaign = null;
+  }
 };
 
 export const startOrchestrator = (localNodeId) => {
+  // Guard against duplicate campaigns (e.g. re-entry from error handler)
+  if (activeCampaign) {
+    console.log('[Orchestrator] Campaign already active, skipping duplicate start.');
+    return;
+  }
   console.log(`[Orchestrator] Initializing on Node ${localNodeId}...`);
-  
+
   const election = etcd.election(ORCHESTRATOR_LOCK_KEY);
   const campaign = election.campaign(localNodeId);
+  activeCampaign = campaign;
   
   campaign.on('elected', () => {
     console.log('★ [Orchestrator] This node is now the Cluster Leader!');
-    orchestratorInterval = setInterval(runOrchestrationLoop, 5000);
+    orchestratorInterval = setInterval(() => {
+      (async () => {
+        try {
+          await runOrchestrationLoop();
+        } catch (err) {
+          console.error('[Orchestrator] Loop error:', err.message);
+        }
+      })();
+    }, 5000);
   });
 
   campaign.on('error', (err) => {
     console.error('[Orchestrator] Election error:', err.message);
+    // Stop the orchestration loop — when the lease expires or connection drops,
+    // this node is no longer the leader and must stop modifying containers.
+    stopOrchestrator();
+    // Re-enter the campaign after a backoff period
+    setTimeout(() => startOrchestrator(localNodeId), 10000);
   });
 };

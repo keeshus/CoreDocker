@@ -12,6 +12,22 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.post('/bulk-read', async (req, res) => {
+  try {
+    const { keys } = req.body;
+    if (!Array.isArray(keys)) {
+      return res.status(400).json({ error: 'keys must be an array', code: 'VALIDATION_ERROR' });
+    }
+    const result = {};
+    for (const key of keys) {
+      result[key] = await getSecret(key);
+    }
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message, code: 'SECRETS_BULK_READ_FAILED' });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     const { key, value } = req.body;

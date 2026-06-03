@@ -1,5 +1,5 @@
 import express from 'express';
-import etcd from '../services/db.js';
+import { etcd } from '../services/db.js';
 
 const router = express.Router();
 const SETTINGS_KEY = 'cluster/settings';
@@ -11,7 +11,9 @@ router.get('/', async (req, res) => {
       dnsVip: '',
       dnsVipInterface: '',
       dnsForwarder: '',
-      clusterDomain: '',
+      sshUser: 'coredocker',
+      resticS3Endpoint: '',
+      resticS3Bucket: '',
     };
     res.json(settings);
   } catch (error) {
@@ -19,9 +21,33 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Allowed settings keys — anything not in this list is rejected on POST.
+const ALLOWED_KEYS = [
+  'dnsVip',
+  'dnsVipInterface',
+  'dnsForwarder',
+  'clusterDomain',
+  'resticS3Endpoint',
+  'resticS3Bucket',
+  'sshUser',
+];
+
 router.post('/', async (req, res) => {
   try {
-    const settings = req.body;
+    // Only persist whitelisted keys — ignore anything else
+    const settings = {};
+    for (const key of ALLOWED_KEYS) {
+      if (key in req.body) {
+        settings[key] = req.body[key];
+      } else {
+        // Preserve existing values for keys not sent in this request
+        const existing = await etcd.get(SETTINGS_KEY).string();
+        if (existing) {
+          const parsed = JSON.parse(existing);
+          if (key in parsed) settings[key] = parsed[key];
+        }
+      }
+    }
     await etcd.put(SETTINGS_KEY).value(JSON.stringify(settings));
     res.json(settings);
   } catch (error) {

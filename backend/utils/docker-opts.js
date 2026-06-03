@@ -1,9 +1,27 @@
 import { getLocalNodeConfig } from '../services/db.js';
 import { getSecret } from '../services/secrets.js';
+import { resolveHostPath } from '../services/ephemeral-tasks.js';
 
 const VALID_RESTART_POLICIES = ['no', 'always', 'unless-stopped', 'on-failure'];
 const IMAGE_NAME_RE = /^[a-zA-Z0-9._\-\/]+(:[a-zA-Z0-9._-]+)?$/;
-const BLOCKLISTED_DEVICES = ['/dev/sda', '/dev/sda1', '/dev/sdb', '/dev/mem', '/dev/kmem', '/dev/port'];
+// Pattern-based blocklist for host devices — reject any block device, memory, or port.
+// USB devices (/dev/ttyUSB*, /dev/bus/usb/) and other safe devices pass through.
+const BLOCKED_DEVICE_PATTERNS = [
+  /^\/dev\/sd/,      // SCSI/SATA disks
+  /^\/dev\/nvme/,    // NVMe SSDs
+  /^\/dev\/vd/,      // virtio block devices
+  /^\/dev\/xvd/,     // Xen virtual disks
+  /^\/dev\/hd/,      // IDE disks
+  /^\/dev\/disk\//,  // disk by-id/by-uuid/by-path
+  /^\/dev\/loop/,    // loop devices
+  /^\/dev\/dm-/,     // device mapper
+  /^\/dev\/mem/,     // /dev/mem (physical memory)
+  /^\/dev\/kmem/,    // /dev/kmem (kernel memory)
+  /^\/dev\/port/,    // /dev/port (I/O port access)
+  /^\/dev\/md/,      // software RAID
+  /^\/dev\/mmcblk/,  // eMMC/SD block devices
+];
+const isDeviceBlocked = (path) => BLOCKED_DEVICE_PATTERNS.some(p => p.test(path));
 
 export const buildCreateOpts = async (name, image, env, volumes, ports, restartPolicy, resources, opts = {}) => {
   if (!IMAGE_NAME_RE.test(image)) {
@@ -27,15 +45,21 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
   });
   await getLocalNodeConfig();
   const binds = (volumes || []).map(v => {
-    let hostPath = v.host;
-    if (v.type === 'backup' || v.type === 'non-backup') {
-      const basePath = v.type === 'backup' ?
-        (process.env.HOST_BACKUP_PATH || '/data/backup') :
-        (process.env.HOST_NONBACKUP_PATH || '/data/non-backup');
-      const folderName = v.host ? `/${v.host}` : '';
-      const safeContainerPath = v.container.replace(/^\//, '').replace(/\//g, '_');
-      hostPath = `${basePath}/${name}${folderName ? folderName : '/' + safeContainerPath}`;
+    // Reject volumes with unknown types — only 'backup' and 'non-backup' are supported.
+    // Raw host paths without a type would be a path traversal / host escape.
+    if (!v.type) {
+      throw new Error('Volume type is required (must be "backup" or "non-backup")');
     }
+    if (v.type !== 'backup' && v.type !== 'non-backup') {
+      throw new Error(`Invalid volume type: ${v.type}`);
+    }
+    let hostPath = v.host;
+    const basePath = v.type === 'backup' ?
+      resolveHostPath(process.env.HOST_BACKUP_PATH, '/mnt/backup') :
+      resolveHostPath(process.env.HOST_NONBACKUP_PATH, '/mnt/non-backup');
+    const folderName = v.host ? `/${v.host}` : '';
+    const safeContainerPath = v.container.replace(/^\//, '').replace(/\//g, '_');
+    hostPath = `${basePath}/${name}${folderName ? folderName : '/' + safeContainerPath}`;
     return `${hostPath}:${v.container}`;
   });
 
@@ -98,7 +122,7 @@ export const buildCreateOpts = async (name, image, env, volumes, ports, restartP
       const [pathOnHost, pathInContainer, cgroupPermissions] = d.trim().split(':');
       if (!pathOnHost) return null;
       if (!pathOnHost.startsWith('/')) return null;
-      if (BLOCKLISTED_DEVICES.includes(pathOnHost)) return null;
+      if (isDeviceBlocked(pathOnHost)) return null;
       return {
         PathOnHost: pathOnHost,
         PathInContainer: pathInContainer || pathOnHost,

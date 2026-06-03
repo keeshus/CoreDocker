@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Plus, Trash2 } from 'lucide-react';
+import { Settings, Plus, Trash2, Pencil } from 'lucide-react';
 import { validatePasswordChange } from '../lib/domain-logic';
 import { useUI } from '../lib/UIProvider';
 
 export default function ClusterSettings() {
   const { showToast, showConfirm } = useUI();
-  const [settings, setSettings] = useState({ dnsVip: '', dnsVipInterface: '', dnsForwarder: '', clusterDomain: '' });
+  const [settings, setSettings] = useState({ dnsVip: '', dnsVipInterface: '', dnsForwarder: '', sshUser: 'coredocker', resticS3Endpoint: '', resticS3Bucket: '' });
+  const [credentials, setCredentials] = useState({ 'cert-domain': '', 'cert-cloudflare-token': '', 'restic-password': '', 'restic-access-key': '', 'restic-secret-key': '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -37,8 +38,28 @@ export default function ClusterSettings() {
       .then(res => res.json())
       .then(data => {
         if (data && typeof data === 'object') {
-          setSettings(prev => ({ ...prev, ...data }));
+          const { clusterDomain, ...rest } = data;
+          setSettings(prev => ({ ...prev, ...rest }));
         }
+        // Load credential values (if node is unsealed)
+        fetch('/api/secrets/bulk-read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keys: ['__system__/cert-domain', '__system__/cert-cloudflare-token', '__system__/restic-password', '__system__/restic-access-key', '__system__/restic-secret-key'] })
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data && typeof data === 'object') {
+              // Map prefixed keys back to short names for the UI
+              const mapped = {};
+              for (const [k, v] of Object.entries(data)) {
+                const shortKey = k.replace('__system__/', '');
+                mapped[shortKey] = v;
+              }
+              setCredentials(prev => ({ ...prev, ...mapped }));
+            }
+          })
+          .catch(() => { /* node may be sealed */ });
         setLoading(false);
       })
       .catch(e => {
@@ -52,17 +73,40 @@ export default function ClusterSettings() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch('/api/settings', {
+      // Save non-sensitive settings
+      const settingsRes = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
-      if (res.ok) {
-        showToast('Settings saved successfully!', 'success');
-      } else {
-        const error = await res.json();
+      if (!settingsRes.ok) {
+        const error = await settingsRes.json();
         showToast('Error saving settings: ' + JSON.stringify(error), 'error');
+        setSaving(false);
+        return;
       }
+
+      // Save credentials via secrets API (uses __system__ prefix so they're hidden from Secrets tab)
+      const credFields = [
+        { key: '__system__/cert-domain', value: credentials['cert-domain'] },
+        { key: '__system__/cert-cloudflare-token', value: credentials['cert-cloudflare-token'] },
+        { key: '__system__/restic-password', value: credentials['restic-password'] },
+        { key: '__system__/restic-access-key', value: credentials['restic-access-key'] },
+        { key: '__system__/restic-secret-key', value: credentials['restic-secret-key'] },
+      ];
+
+      let allOk = true;
+      for (const { key, value } of credFields) {
+        if (!value) continue;
+        const res = await fetch('/api/secrets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, value })
+        });
+        if (!res.ok) allOk = false;
+      }
+
+      showToast(allOk ? 'Settings saved successfully!' : 'Settings saved but some credentials failed', allOk ? 'success' : 'error');
     } catch (e) {
       showToast('Error saving settings: ' + e.message, 'error');
     }
@@ -130,6 +174,31 @@ export default function ClusterSettings() {
     setIsChangingPassword(false);
   };
 
+  const [renamingNode, setRenamingNode] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  const handleRenameNode = async (id) => {
+    if (!renameValue.trim()) { setRenamingNode(null); return; }
+    try {
+      const res = await fetch(`/api/nodes/${id}/rename`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: renameValue.trim() }),
+      });
+      if (res.ok) {
+        fetchNodes();
+        showToast('Node renamed.', 'success');
+      } else {
+        const err = await res.json();
+        showToast('Error: ' + err.error, 'error');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setRenamingNode(null);
+    setRenameValue('');
+  };
+
   const [dekPassword, setDekPassword] = useState('');
   const [showDekPrompt, setShowDekPrompt] = useState(false);
 
@@ -169,18 +238,6 @@ export default function ClusterSettings() {
 
       <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '600px', marginTop: '20px' }}>
         <div>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Global Cluster Domain</label>
-          <input
-            type="text"
-            value={settings.clusterDomain}
-            onChange={e => setSettings({...settings, clusterDomain: e.target.value})}
-            placeholder="e.g. coredocker.domain.ext"
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-          />
-          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>The main domain name for the whole cluster. Resolves to the master node IP via CoreDNS (activated after unseal).</small>
-        </div>
-
-        <div>
           <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>DNS VIP Interface</label>
           <input
             type="text"
@@ -206,9 +263,9 @@ export default function ClusterSettings() {
 
         <div>
           <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Shared DNS VIP Address</label>
-          <input 
-            type="text" 
-            value={settings.dnsVip} 
+          <input
+            type="text"
+            value={settings.dnsVip}
             onChange={e => setSettings({...settings, dnsVip: e.target.value})}
             placeholder="e.g. 10.0.0.53"
             style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
@@ -216,8 +273,114 @@ export default function ClusterSettings() {
           <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Static IP used by your router for DNS. Managed via Keepalived on up to 3 nodes.</small>
         </div>
 
-        <button 
-          type="submit" 
+        <div style={{ paddingTop: '10px', borderTop: '2px solid #e2e8f0' }}>
+          <h3 style={{ fontSize: '1.1em', margin: '0 0 10px 0', color: '#1e293b' }}>SSH & Sync</h3>
+          <div>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>SSH User (for HA rsync)</label>
+            <input
+              type="text"
+              value={settings.sshUser}
+              onChange={e => setSettings({...settings, sshUser: e.target.value})}
+              placeholder="e.g. coredocker"
+              style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+            />
+            <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Non-root SSH user for HA folder sync across nodes. The user's ~/.ssh/authorized_keys is managed automatically.</small>
+          </div>
+        </div>
+
+        <div style={{ paddingTop: '10px', borderTop: '2px solid #e2e8f0' }}>
+          <h3 style={{ fontSize: '1.1em', margin: '0 0 10px 0', color: '#1e293b' }}>Restic S3 Backup</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>S3 Endpoint</label>
+              <input
+                type="text"
+                value={settings.resticS3Endpoint}
+                onChange={e => setSettings({...settings, resticS3Endpoint: e.target.value})}
+                placeholder="e.g. s3.eu-central-1.wasabisys.com"
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>S3 Bucket</label>
+              <input
+                type="text"
+                value={settings.resticS3Bucket}
+                onChange={e => setSettings({...settings, resticS3Bucket: e.target.value})}
+                placeholder="e.g. my-backup-bucket"
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+              />
+            </div>
+          </div>
+          <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Repository URL will be: s3:https://ENDPOINT/BUCKET</small>
+
+          <div style={{ marginTop: '15px', padding: '12px', background: '#f1f5f9', borderRadius: '6px' }}>
+            <p style={{ color: '#475569', fontSize: '0.85em', margin: '0 0 12px 0', fontWeight: 'bold' }}>Credentials (stored as encrypted secrets)</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85em', fontWeight: 'bold', marginBottom: '8px' }}>Repository Password</label>
+                <input
+                  type="password"
+                  value={credentials['restic-password']}
+                  onChange={e => setCredentials({...credentials, 'restic-password': e.target.value})}
+                  placeholder="Restic encryption password"
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85em', fontWeight: 'bold', marginBottom: '8px' }}>S3 Access Key</label>
+                <input
+                  type="password"
+                  value={credentials['restic-access-key']}
+                  onChange={e => setCredentials({...credentials, 'restic-access-key': e.target.value})}
+                  placeholder="S3 access key"
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85em', fontWeight: 'bold', marginBottom: '8px' }}>S3 Secret Key</label>
+                <input
+                  type="password"
+                  value={credentials['restic-secret-key']}
+                  onChange={e => setCredentials({...credentials, 'restic-secret-key': e.target.value})}
+                  placeholder="S3 secret key"
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ paddingTop: '10px', borderTop: '2px solid #e2e8f0' }}>
+          <h3 style={{ fontSize: '1.1em', margin: '0 0 10px 0', color: '#1e293b' }}>TLS Certificates (Let's Encrypt)</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Domain</label>
+              <input
+                type="text"
+                value={credentials['cert-domain']}
+                onChange={e => setCredentials({...credentials, 'cert-domain': e.target.value})}
+                placeholder="e.g. example.com"
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+              />
+              <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Stored as encrypted secret.</small>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>Cloudflare API Token (DNS-01)</label>
+              <input
+                type="password"
+                value={credentials['cert-cloudflare-token']}
+                onChange={e => setCredentials({...credentials, 'cert-cloudflare-token': e.target.value})}
+                placeholder="Cloudflare API token"
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+              />
+              <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Stored as encrypted secret.</small>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="submit"
           disabled={saving}
           style={{ padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', width: 'fit-content' }}
         >
@@ -284,7 +447,20 @@ export default function ClusterSettings() {
               <tr><td colSpan="5" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No nodes registered.</td></tr>
             ) : nodes.map(node => (
               <tr key={node.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>{node.name}</td>
+                <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>
+                  {renamingNode === node.id ? (
+                    <input
+                      value={renameValue}
+                      onChange={e => setRenameValue(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleRenameNode(node.id); if (e.key === 'Escape') setRenamingNode(null); }}
+                      onBlur={() => handleRenameNode(node.id)}
+                      autoFocus
+                      style={{ width: '120px', padding: '4px 8px', border: '1px solid #3b82f6', borderRadius: '4px' }}
+                    />
+                  ) : (
+                    node.name
+                  )}
+                </td>
                 <td style={{ padding: '15px 10px', color: '#64748b' }}>{node.ip}</td>
                 <td style={{ padding: '15px 10px' }}>
                   <span style={{
@@ -302,7 +478,7 @@ export default function ClusterSettings() {
                     </span>
                   ) : (
                     <a
-                      href={`http://${node.id}.core-docker.local`}
+                      href={`https://${node.name}.core-docker.local`}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{
@@ -315,6 +491,13 @@ export default function ClusterSettings() {
                   )}
                 </td>
                 <td style={{ padding: '15px 10px', textAlign: 'right' }}>
+                  <button
+                    onClick={() => { setRenamingNode(node.id); setRenameValue(node.name); }}
+                    style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', marginRight: '8px' }}
+                    title="Rename Node"
+                  >
+                    <Pencil size={18} />
+                  </button>
                   <button
                     onClick={() => handleDeleteNode(node.id)}
                     style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}

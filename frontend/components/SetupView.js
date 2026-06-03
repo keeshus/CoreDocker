@@ -14,7 +14,8 @@ export default function SetupView({ onSetup }) {
       onSetup({
         mode: 'join',
         primaryIp: e.target.primaryIp.value,
-        joinToken: e.target.joinToken.value
+        joinToken: e.target.password.value,
+        password: e.target.password.value
       });
     } else if (setupMode === 'restore') {
       onSetup({
@@ -79,21 +80,24 @@ export default function SetupView({ onSetup }) {
 
           {setupMode === 'join' && (
             <>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9em', color: '#475569' }}>Primary Node IP</label>
-              <input 
-                name="primaryIp" type="text" placeholder="192.168.1.100" required autoFocus
-                style={{ 
-                  width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px', 
-                  border: '1px solid #e2e8f0', boxSizing: 'border-box' 
-                }} 
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9em', color: '#475569' }}>Primary Node Backhaul IP</label>
+              <input
+                name="primaryIp" type="text" placeholder="Backhaul IP of the primary node" required autoFocus
+                style={{
+                  width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px',
+                  border: '1px solid #e2e8f0', boxSizing: 'border-box'
+                }}
               />
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9em', color: '#475569' }}>Cluster Join Token</label>
-              <input 
-                name="joinToken" type="text" placeholder="Token" required
-                style={{ 
-                  width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px', 
-                  border: '1px solid #e2e8f0', boxSizing: 'border-box' 
-                }} 
+              <p style={{ fontSize: '0.75em', color: '#94a3b8', marginTop: '-16px', marginBottom: '20px' }}>
+                Use the cluster-internal (backhaul) IP, not the public-facing IP.
+              </p>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9em', color: '#475569' }}>Master Password</label>
+              <input
+                name="password" type="password" placeholder="Cluster master password" required
+                style={{
+                  width: '100%', padding: '12px', marginBottom: '20px', borderRadius: '6px',
+                  border: '1px solid #e2e8f0', boxSizing: 'border-box'
+                }}
               />
             </>
           )}

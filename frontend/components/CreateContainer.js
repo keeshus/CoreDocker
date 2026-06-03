@@ -30,21 +30,37 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
 
   const [formData, setFormData] = useState(defaultFormData);
 
-  useEffect(() => {
-    fetch('/api/secrets')
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setSecrets(Array.isArray(data) ? data : []))
-      .catch(err => console.error('Failed to fetch secrets:', err));
+  const fetchGroups = () =>
     fetch('/api/groups')
       .then(res => res.json())
       .then(data => setGroups(data || []))
       .catch(err => console.error('Failed to fetch groups:', err));
 
+  const fetchSecrets = () =>
+    fetch('/api/secrets')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setSecrets(Array.isArray(data) ? data : []))
+      .catch(err => console.error('Failed to fetch secrets:', err));
+
+  const fetchNodes = () =>
     fetch('/api/nodes')
       .then(res => res.json())
       .then(data => setNodes(data || []))
       .catch(err => console.error('Failed to fetch nodes:', err));
+
+  useEffect(() => {
+    fetchSecrets();
+    fetchGroups();
+    fetchNodes();
   }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchGroups();
+      fetchSecrets();
+      fetchNodes();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (initialData) {

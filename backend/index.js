@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import https from 'https';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import containerRoutes from './routes/containers.js';
@@ -32,10 +33,12 @@ import {
   rotateDEK,
   unsealNode,
   verifyClusterToken,
+  verifyMasterPassword,
   getOrCreateJwtSecret,
   getJwtSecret,
 } from './services/secrets.js';
-import { isTokenBlacklisted, refreshToken, signToken, revokeAllSessions, checkSessionGeneration } from './services/session.js';
+import { isTokenBlacklisted, blacklistToken, refreshToken, signToken, revokeAllSessions, checkSessionGeneration } from './services/session.js';
+import { nodeId } from './config.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -45,11 +48,49 @@ const port = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 let JWT_SECRET = null;
-const nodeId = process.env.NODE_ID || uuidv4();
 const nodeName = process.env.NODE_NAME || 'node-1';
 const nodeIp = process.env.NODE_IP || '127.0.0.1';
 const clientIp = process.env.NODE_CLIENT_IP || nodeIp;
 let clusterBooted = false;
+
+// Helper: HTTPS fetch that skips SSL verification for inter-node cluster traffic
+// (self-signed certs on the backhaul network)
+function insecureFetch(url, opts = {}) {
+  const method = opts.method || 'GET';
+  console.log(`[Cluster] → ${method} ${url}`);
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(u, {
+      method,
+      headers: opts.headers || {},
+      rejectUnauthorized: false,
+      timeout: 60000, // 60s timeout for inter-node API calls
+    }, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        console.log(`[Cluster] ← ${res.statusCode} from ${method} ${url} (${body.length} bytes)`);
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          json: async () => JSON.parse(body),
+          text: async () => body,
+        });
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      console.error(`[Cluster] ← TIMEOUT from ${method} ${url}`);
+      reject(new Error(`Request timed out: ${method} ${url}`));
+    });
+    req.on('error', (err) => {
+      console.error(`[Cluster] ← ERROR from ${method} ${url}: ${err.message}`);
+      reject(err);
+    });
+    if (opts.body) req.write(opts.body);
+    req.end();
+  });
+}
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -66,8 +107,14 @@ app.use(helmet({
 app.use(cookieParser());
 app.use(express.json());
 
+// CORS: reject misconfigured origins that would allow any website with credentials.
+// Server-to-server calls (join, event proxying) use insecureFetch which bypasses CORS.
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
+if (corsOrigin === 'true' || corsOrigin === '*') {
+  console.error('[Security] CORS_ORIGIN cannot be "true" or "*" with credentials enabled. Falling back to http://localhost:3000');
+}
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: (corsOrigin === 'true' || corsOrigin === '*') ? 'http://localhost:3000' : corsOrigin,
   credentials: true,
 }));
 
@@ -192,6 +239,7 @@ const requireAuth = async (req, res, next) => {
       req.clusterNode = verifyClusterToken(clusterToken);
       return next();
     } catch (err) {
+      console.warn('[Auth] Invalid cluster token:', err.message);
     }
   }
 
@@ -253,8 +301,8 @@ app.get('/api/system/status', async (req, res) => {
     initialized,
     sealed,
     authenticated,
-    nodeId: (authenticated || !initialized) ? nodeId : undefined,
-    nodeName: (authenticated || !initialized) ? nodeName : undefined,
+    nodeId: (!initialized && !authenticated) ? undefined : nodeId,
+    nodeName: (!initialized && !authenticated) ? undefined : nodeName,
   });
 });
 
@@ -285,8 +333,7 @@ async function restoreSystem(snapshotPath, password) {
     throw new Error('Snapshot file does not appear to be a valid etcd backup (plaintext content detected)');
   }
 
-  const backupPath = process.env.HOST_BACKUP_PATH || '/data/backup';
-  const destPath = `${backupPath}/${SYSTEM_NAMESPACE}/etcd-snapshot-restore.db`;
+  const destPath = `/mnt/backup/${SYSTEM_NAMESPACE}/etcd-snapshot-restore.db`;
   fs.writeFileSync(destPath, snapshotData);
   console.log('Snapshot copied to', destPath);
   await initializeSystem(password);
@@ -315,7 +362,11 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       await bootCluster(nodeId);
       logEvent('security', 'info', 'System initialized (create)', { nodeId, nodeName });
     } else if (mode === 'join') {
-      const joinRes = await fetch(`${getNodeUrl(primaryIp)}/api/system/join`, {
+      console.log(`[Cluster] Joining cluster via primary ${primaryIp} as ${nodeName} (ip=${nodeIp}, clientIp=${clientIp})`);
+      const joinUrl = `${getNodeUrl(primaryIp)}/api/system/join`;
+      console.log(`[Cluster] Sending join request to ${joinUrl}`);
+
+      const joinRes = await insecureFetch(joinUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -324,10 +375,13 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
         body: JSON.stringify({ name: nodeName, ip: nodeIp, clientIp }),
       });
       if (!joinRes.ok) {
-        throw new Error('Failed to join cluster: ' + await joinRes.text());
+        const resBody = await joinRes.text();
+        console.error(`[Cluster] Join request failed (status ${joinRes.status}): ${resBody}`);
+        throw new Error('Failed to join cluster: ' + resBody);
       }
 
       const joinData = await joinRes.json();
+      console.log(`[Cluster] Join response: memberName=${joinData.clusterConfig?.memberName}, initialCluster=${joinData.clusterConfig?.initialCluster}, clientUrls=[${(joinData.clusterConfig?.memberClientUrls || []).join(', ')}]`);
 
       if (!joinData.clusterConfig) {
         // Legacy leader — no cluster config returned, fall through
@@ -348,7 +402,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
         try {
           const fs = await import('fs');
           const path = await import('path');
-          const authDir = path.join(process.env.HOST_BACKUP_PATH || '/data/backup', '__system__', 'etcd');
+          const authDir = path.join('/mnt/backup', '__system__', 'etcd');
           if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
           fs.writeFileSync(path.join(authDir, 'auth.json'), JSON.stringify({
             username: joinData.clusterConfig.authUsername,
@@ -357,6 +411,16 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
           reconnectEtcd();
         } catch (e) {
           console.warn('[Cluster] Failed to save etcd auth credentials:', e.message);
+        }
+      }
+
+      // Save keepalived VRRP password from primary node for DNS VIP failover
+      if (joinData.clusterConfig.keepalivedPassword) {
+        try {
+          await etcd.put('__system__/keepalived/password').value(joinData.clusterConfig.keepalivedPassword);
+          console.log('[Cluster] Keepalived VRRP password saved.');
+        } catch (e) {
+          console.warn('[Cluster] Failed to save keepalived password:', e.message);
         }
       }
 
@@ -412,6 +476,13 @@ app.post('/api/system/join', async (req, res) => {
       return res.status(401).json({ error: 'Missing or invalid join token', code: 'AUTH_REQUIRED' });
     }
 
+    const joinToken = authHeader.split(' ')[1];
+    try {
+      await verifyMasterPassword(joinToken);
+    } catch (e) {
+      return res.status(403).json({ error: 'Invalid master password', code: 'JOIN_FORBIDDEN' });
+    }
+
     const { name, ip, clientIp: joinClientIp } = req.body;
 
     const clusterInfo = await addEtcdMember(name, ip);
@@ -426,6 +497,14 @@ app.post('/api/system/join', async (req, res) => {
       allUrls.push(selfClientUrl);
     }
 
+    // Read keepalived password to share with joining node
+    let keepalivedPassword;
+    try {
+      keepalivedPassword = await etcd.get('__system__/keepalived/password').string();
+    } catch (e) {
+      console.warn('[Join] Could not read keepalived password:', e.message);
+    }
+
     res.json({
       success: true,
       id,
@@ -437,12 +516,15 @@ app.post('/api/system/join', async (req, res) => {
         clusterToken: clusterInfo.clusterToken,
         authUsername: clusterInfo.authUsername,
         authPassword: clusterInfo.authPassword,
+        keepalivedPassword,
       },
     });
   } catch (e) {
     res.status(400).json({ error: e.message, code: 'JOIN_FAILED' });
   }
 });
+
+
 
 app.post('/api/system/unseal', async (req, res) => {
   try {
@@ -479,7 +561,10 @@ app.post('/api/system/unseal', async (req, res) => {
   }
 });
 
-app.post('/api/system/logout', (req, res) => {
+app.post('/api/system/logout', requireAuth, async (req, res) => {
+  if (req.user?.jti) {
+    await blacklistToken(req.user.jti).catch(e => console.warn('[Auth] Failed to blacklist token on logout:', e.message));
+  }
   res.clearCookie('token');
   res.json({ success: true });
 });
@@ -562,6 +647,12 @@ const shutdown = async (signal) => {
   closeEtcd();
   process.exit(0);
 };
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Process] Unhandled rejection:', reason?.message || reason);
+  // Don't crash — log and degrade. The etcd circuit breaker can trigger
+  // rejections in setInterval callbacks, which should be handled, not fatal.
+});
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));

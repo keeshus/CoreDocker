@@ -1,4 +1,4 @@
-import etcd from './db.js';
+import { etcd } from './db.js';
 
 const MIGRATIONS_PREFIX = 'system/migrations/';
 

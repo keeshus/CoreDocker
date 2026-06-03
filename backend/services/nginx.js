@@ -1,6 +1,7 @@
+import { readFile } from 'fs/promises';
 import docker from './docker.js';
 import { getLocalNodeConfig } from './db.js';
-import { runEphemeralTask, writeFileToHost, removeFileFromHost, SYSTEM_NAMESPACE } from './ephemeral-tasks.js';
+import { runEphemeralTask, writeFileToHost, removeFileFromHost, SYSTEM_NAMESPACE, resolveHostPath } from './ephemeral-tasks.js';
 import { logEvent } from './logger.js';
 
 const NGINX_CONF_DIR = `${SYSTEM_NAMESPACE}/nginx/conf.d`;
@@ -117,6 +118,7 @@ export async function reloadNginx() {
                 AttachStderr: true
             });
             const stream = await exec.start();
+            stream.on('data', () => {});
             stream.pipe(process.stdout);
         }
     } catch (error) {
@@ -173,7 +175,8 @@ export async function bootstrapNginx() {
 
     const localNode = await getLocalNodeConfig();
     const nodeName = localNode?.name || 'node-1';
-    const backupPath = localNode?.backupPath || process.env.HOST_BACKUP_PATH || '/data/backup';
+    const rawBackupPath = localNode?.backupPath || process.env.HOST_BACKUP_PATH;
+    const backupPath = resolveHostPath(rawBackupPath, '/mnt/backup');
 
     // Ensure the image exists
     try {
@@ -196,7 +199,8 @@ export async function bootstrapNginx() {
          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
          -keyout /data/backup/${SYSTEM_NAMESPACE}/nginx/ssl/host/privkey.pem \
          -out /data/backup/${SYSTEM_NAMESPACE}/nginx/ssl/host/fullchain.pem \
-         -subj "/CN=${nodeName}.local"`
+         -subj "/CN=${nodeName}.core-docker.local" \
+         -addext "subjectAltName=DNS:${nodeName}.core-docker.local,DNS:*.core-docker.local"`
     ]);
 
     const binds = [
@@ -245,6 +249,15 @@ server {
 
     resolver 127.0.0.11 valid=30s;
 
+    # Proxy API requests directly to backend (inter-node cluster traffic)
+    location /api/ {
+        proxy_pass http://core-docker-backend:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     include /etc/nginx/conf.d/locations/*.conf;
 
     set $frontend_upstream http://core-docker-frontend:3000;
@@ -280,10 +293,37 @@ server {
         }
     }).then(container => container.start());
 
+    const nginxContainer = docker.getContainer(CONTAINER_NAME);
+
+    // Copy SSL certs into the container via Docker exec as a fallback
+    // in case the bind mount path can't be resolved (rootless Docker, etc.).
+    // Read from compose volume mount inside backend (not backupPath which is the host-side path).
+    const certDir = `/mnt/backup/${SYSTEM_NAMESPACE}/nginx/ssl/host`;
+    for (const certFile of ['fullchain.pem', 'privkey.pem']) {
+      const certPath = `${certDir}/${certFile}`;
+      try {
+        const certContent = await readFile(certPath);
+        const b64Cert = certContent.toString('base64');
+        const exec = await nginxContainer.exec({
+          Cmd: ['sh', '-c', `echo ${b64Cert} | base64 -d > /etc/nginx/ssl/host/${certFile}`],
+          AttachStdout: true,
+          AttachStderr: true
+        });
+        await new Promise((resolve, reject) => {
+          exec.start((err, stream) => {
+            if (err) { reject(err); return; }
+            stream.on('end', resolve);
+            stream.resume();
+          });
+        });
+      } catch (err) {
+        console.error(`[NGINX] Failed to copy ${certFile}: ${err.message}`);
+      }
+    }
+
     // Write config into the container via Docker exec (bind mount path resolution
     // differs between rootless Docker and compose-managed mounts).
     const b64Config = Buffer.from(defaultConfContent.trimStart()).toString('base64');
-    const nginxContainer = docker.getContainer(CONTAINER_NAME);
     const writeExec = await nginxContainer.exec({
         Cmd: ['sh', '-c', `echo ${b64Config} | base64 -d > /etc/nginx/conf.d/default.conf`],
         AttachStdout: true,
