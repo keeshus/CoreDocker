@@ -66,10 +66,10 @@ async function withLock(taskName, scope, callback) {
   let acquired = false;
   try {
     // Atomic compare-and-swap: only create if key doesn't exist
-    await etcd.if(lockKey, 'Create', '==', 0)
+    const result = await etcd.if(lockKey, 'Create', '==', 0)
       .then(lease.put(lockKey).value(nodeId))
-      .else(() => {})
       .commit();
+    if (!result.succeeded) return; // Lock held by another node — skip silently
     acquired = true;
 
     try {

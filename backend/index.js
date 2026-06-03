@@ -16,7 +16,7 @@ import settingsRoutes from './routes/settings.js';
 import groupRoutes from './routes/groups.js';
 import {reconcileContainers, startReconciler, stopReconciler} from './services/reconciler.js';
 import {bootstrapEtcd, addEtcdMember, migrateToCluster, clearClusterConfig} from './services/etcd-cluster.js';
-import {closeEtcd, registerLocalNode, waitForEtcd, saveNode, updateEtcdHosts, reconnectEtcd} from './services/db.js';
+import {closeEtcd, etcd, registerLocalNode, waitForEtcd, saveNode, updateEtcdHosts, reconnectEtcd} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import {bootstrapNginx, getNodeUrl} from './services/nginx.js';

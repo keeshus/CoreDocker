@@ -285,6 +285,7 @@ export const bootstrapEtcd = async () => {
   let cmd;
   let portBindings = {};
   let clusterToken;
+  let keepalivedPass;
 
   if (clusterConfig) {
     // Clustered mode — use saved peer URLs
@@ -323,7 +324,7 @@ export const bootstrapEtcd = async () => {
       : `http://${CONTAINER_NAME}:2380`;
 
     clusterToken = crypto.randomBytes(16).toString('hex');
-    const keepalivedPass = process.env.KEEPALIVED_PASSWORD || crypto.randomBytes(16).toString('hex');
+    keepalivedPass = process.env.KEEPALIVED_PASSWORD || crypto.randomBytes(16).toString('hex');
 
     cmd = [
       'etcd',
