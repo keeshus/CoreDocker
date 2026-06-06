@@ -148,14 +148,18 @@ export const runTask = async (taskId, force = false) => {
           taskResult = { stdout: 'Restic credentials (password, access key, secret key) not configured. Set them in Cluster Settings.', exitCode: 0 };
         } else {
           const repo = `s3:https://${settings.resticS3Endpoint}/${settings.resticS3Bucket}`;
-          const env = [
-            `RESTIC_REPOSITORY=${repo}`,
-            `RESTIC_PASSWORD=${resticPassword}`,
-            `AWS_ACCESS_KEY_ID=${accessKey}`,
-            `AWS_SECRET_ACCESS_KEY=${secretKey}`,
-          ];
+          const awsCredentialsFile = `[default]\naws_access_key_id = ${accessKey}\naws_secret_access_key = ${secretKey}\n`;
 
-          const options = { Env: env };
+          const options = {
+            Secrets: {
+              'RESTIC_PASSWORD': resticPassword,
+              'aws-credentials': awsCredentialsFile,
+            },
+            Env: [
+              `RESTIC_REPOSITORY=${repo}`,
+              `AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws-credentials`,
+            ],
+          };
 
           // Check if repo is initialized
           const checkResult = await runEphemeralTask('restic/restic', ['snapshots'], options);
@@ -437,9 +441,10 @@ async function performHASync() {
 
 async function runCertbotRenew() {
   const backupPath = '/mnt/backup';
+  const nonBackupPath = '/mnt/non-backup';
   const sslDir = path.join(backupPath, SYSTEM_NAMESPACE, 'nginx', 'ssl', 'host');
   const fullchainPath = path.join(sslDir, 'fullchain.pem');
-  const credsPath = path.join(backupPath, SYSTEM_NAMESPACE, 'cloudflare.creds');
+  const credsPath = path.join(nonBackupPath, SYSTEM_NAMESPACE, '.tmp-certbot-creds');
 
   // Read Cloudflare DNS-01 credentials from cluster secrets
   let domain, cfToken;

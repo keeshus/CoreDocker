@@ -1,7 +1,8 @@
-import { readFileSync, existsSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import docker from './docker.js';
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 
 const BACKUP_MOUNT = '/mnt/backup';
 const NONBACKUP_MOUNT = '/mnt/non-backup';
@@ -31,6 +32,8 @@ export function validatePath(p) {
 }
 
 export async function runEphemeralTask(image, cmd, options = {}) {
+  const secretCleanups = [];
+
   try {
     try {
       await docker.getImage(image).inspect();
@@ -45,19 +48,45 @@ export async function runEphemeralTask(image, cmd, options = {}) {
     const backupPath = resolveHostPath(process.env.HOST_BACKUP_PATH, BACKUP_MOUNT);
     const nonBackupPath = resolveHostPath(process.env.HOST_NONBACKUP_PATH, NONBACKUP_MOUNT);
 
-    const defaultHostConfig = {
-      Binds: [
-        `${backupPath}:/data/backup`,
-        `${nonBackupPath}:/data/non-backup`
-      ],
-      AutoRemove: false
+    const defaultBinds = [
+      `${backupPath}:/data/backup`,
+      `${nonBackupPath}:/data/non-backup`
+    ];
+
+    // Handle secrets as files instead of env vars to avoid docker inspect exposure
+    const { Secrets, Env, HostConfig: userHostConfig, ...restOptions } = options;
+    const extraBinds = [];
+    const envOverrides = [];
+
+    if (Secrets && typeof Secrets === 'object') {
+      const runId = crypto.randomBytes(6).toString('hex');
+      const secretBaseDir = `${nonBackupPath}/${SYSTEM_NAMESPACE}/secrets/${runId}`;
+
+      for (const [key, value] of Object.entries(Secrets)) {
+        if (value === null || value === undefined) continue;
+        const hostPath = `${secretBaseDir}/${key}`;
+        mkdirSync(path.dirname(hostPath), { recursive: true });
+        writeFileSync(hostPath, String(value), { mode: 0o600 });
+        // Mount into container at /run/secrets/{key} (read-only)
+        extraBinds.push(`${hostPath}:/run/secrets/${key}:ro`);
+        // Some tools support _FILE variants that point to the secret file
+        envOverrides.push(`${key}_FILE=/run/secrets/${key}`);
+      }
+      secretCleanups.push(secretBaseDir);
+    }
+
+    const hostConfig = {
+      Binds: [...defaultBinds, ...extraBinds],
+      AutoRemove: false,
+      ...userHostConfig,
     };
 
     const container = await docker.createContainer({
       Image: image,
       Cmd: cmd,
-      HostConfig: { ...defaultHostConfig, ...options.HostConfig },
-      ...options
+      Env: [...(Env || []), ...envOverrides],
+      HostConfig: hostConfig,
+      ...restOptions
     });
 
     try {
@@ -75,8 +104,16 @@ export async function runEphemeralTask(image, cmd, options = {}) {
       await container.remove().catch(e =>
         console.warn(`[EphemeralTasks] Failed to remove container: ${e.message}`)
       );
+      // Clean up secret files
+      for (const dir of secretCleanups) {
+        try { rmSync(dir, { recursive: true, force: true }); } catch {}
+      }
     }
   } catch (error) {
+    // Clean up on error too
+    for (const dir of secretCleanups) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
     console.error(`[EphemeralTasks] Task failed (${image}):`, error.message);
     throw error;
   }
