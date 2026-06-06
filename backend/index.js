@@ -613,9 +613,15 @@ const stopSystemContainers = async () => {
         console.log(`Cleaning up container ${c.Names[0]}...`);
         try {
           const container = docker.getContainer(c.Id);
-          await container.stop();
-          await container.remove();
-        } catch(e) {}
+          // Force-stop with a short timeout to avoid hanging shutdown
+          await Promise.race([
+            container.stop(),
+            new Promise(r => setTimeout(r, 5000))
+          ]);
+          await container.remove({ force: true });
+        } catch(e) {
+          console.warn(`Failed to clean up ${c.Names[0]}: ${e.message}`);
+        }
       }
     }
 
@@ -644,7 +650,7 @@ const shutdown = async (signal) => {
   stopOrchestrator();
   stopReconciler();
   await stopSystemContainers();
-  closeEtcd();
+  try { await closeEtcd(); } catch {}
   process.exit(0);
 };
 
