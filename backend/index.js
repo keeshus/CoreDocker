@@ -608,12 +608,12 @@ const stopSystemContainers = async () => {
   console.log('Stopping and removing system containers and networks...');
   try {
     const containers = await docker.listContainers({ all: true });
-    for (const c of containers) {
-      if (c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend') {
+    const cleanup = containers
+      .filter(c => c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend')
+      .map(async c => {
         console.log(`Cleaning up container ${c.Names[0]}...`);
         try {
           const container = docker.getContainer(c.Id);
-          // Force-stop with a short timeout to avoid hanging shutdown
           await Promise.race([
             container.stop(),
             new Promise(r => setTimeout(r, 5000))
@@ -622,36 +622,52 @@ const stopSystemContainers = async () => {
         } catch(e) {
           console.warn(`Failed to clean up ${c.Names[0]}: ${e.message}`);
         }
-      }
-    }
+      });
+    await Promise.all(cleanup);
 
     const networks = await docker.listNetworks();
-    for (const n of networks) {
-      // Only clean up dynamically-created networks. app-net is managed
-      // by docker-compose and will be removed when the stack goes down.
-      if (n.Name === 'web-proxy' || n.Name.startsWith('group-')) {
+    const netCleanup = networks
+      .filter(n => n.Name === 'web-proxy' || n.Name.startsWith('group-'))
+      .map(async n => {
         console.log(`Cleaning up network ${n.Name}...`);
         try {
-          const network = docker.getNetwork(n.Id);
-          await network.remove();
+          await docker.getNetwork(n.Id).remove();
         } catch(e) {
           console.error(`Failed to remove network ${n.Name}: ${e.message}`);
         }
-      }
-    }
+      });
+    await Promise.all(netCleanup);
   } catch (e) {
     console.error('Error cleaning up system resources:', e.message);
   }
 };
 
-const shutdown = async (signal) => {
+const shutdown = (signal) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   console.log(`${signal} received. Shutting down gracefully...`);
-  stopScheduler();
-  stopOrchestrator();
-  stopReconciler();
-  await stopSystemContainers();
-  try { await closeEtcd(); } catch {}
-  process.exit(0);
+
+  // Hard safety net: exit no matter what after 25s (compose grace period is 30s)
+  const hardExit = setTimeout(() => {
+    console.error('Shutdown timed out — forcing exit.');
+    process.exit(1);
+  }, 55000);
+  hardExit.unref();
+
+  (async () => {
+    try {
+      stopScheduler();
+      stopOrchestrator();
+      stopReconciler();
+      await stopSystemContainers();
+      try { await closeEtcd(); } catch {}
+    } catch (e) {
+      console.error('Error during shutdown:', e.message);
+    } finally {
+      clearTimeout(hardExit);
+      process.exit(0);
+    }
+  })();
 };
 
 process.on('unhandledRejection', (reason, promise) => {
