@@ -5,7 +5,7 @@ vi.mock('../../backend/services/docker.js', () => ({ default: mockDocker }));
 vi.mock('../../backend/services/db.js', () => ({
   getContainers: vi.fn(),
   getNodes: vi.fn(),
-  default: {
+  etcd: {
     get: vi.fn(),
     put: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),

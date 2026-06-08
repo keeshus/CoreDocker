@@ -471,7 +471,7 @@ describe('filterContainersByNode', () => {
 // ---------------------------------------------------------------------------
 describe('validatePasswordChange', () => {
   it('returns valid when passwords match', () => {
-    const result = validatePasswordChange({ current: 'old', next: 'new123', confirm: 'new123' });
+    const result = validatePasswordChange({ current: 'old', next: 'NewPass123!x', confirm: "NewPass123!x" });
     expect(result).toEqual({ valid: true });
   });
 
@@ -485,9 +485,9 @@ describe('validatePasswordChange', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('returns valid when both next and confirm are empty (passwords match)', () => {
+  it('returns invalid when both next and confirm are empty (weak password)', () => {
     const result = validatePasswordChange({ current: 'old', next: '', confirm: '' });
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
   });
 });
 

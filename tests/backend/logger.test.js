@@ -6,7 +6,7 @@ const mockEtcd = {
 };
 
 vi.mock('../../backend/services/db.js', () => ({
-  default: {
+  etcd: {
     get: (key) => ({
       string: () => Promise.resolve(mockEtcd.store[key] || null),
     }),

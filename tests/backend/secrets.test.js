@@ -53,7 +53,7 @@ const mockDbDefault = {
 };
 
 vi.mock('../../backend/services/db.js', () => ({
-  default: mockDbDefault,
+  etcd: mockDbDefault,
 }));
 
 const PASSWORD = 'MyStr0ng!Pass';

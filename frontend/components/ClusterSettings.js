@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Plus, Trash2, Pencil } from 'lucide-react';
+import { Trash2, Pencil } from 'lucide-react';
 import { validatePasswordChange } from '../lib/domain-logic';
 import { useUI } from '../lib/UIProvider';
 
@@ -12,8 +12,6 @@ export default function ClusterSettings() {
 
   // Cluster Nodes State
   const [nodes, setNodes] = useState([]);
-  const [newNodeName, setNewNodeName] = useState('');
-  const [newNodeIp, setNewNodeIp] = useState('');
   const [loadingNodes, setLoadingNodes] = useState(true);
 
   // Security Form State
@@ -111,26 +109,6 @@ export default function ClusterSettings() {
       showToast('Error saving settings: ' + e.message, 'error');
     }
     setSaving(false);
-  };
-
-  const handleAddNode = async (e) => {
-    e.preventDefault();
-    if (!newNodeName || !newNodeIp) return;
-    
-    try {
-      const res = await fetch('/api/nodes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newNodeName, ip: newNodeIp }),
-      });
-      if (res.ok) {
-        setNewNodeName('');
-        setNewNodeIp('');
-        fetchNodes();
-      }
-    } catch (e) {
-      console.error(e);
-    }
   };
 
   const handleDeleteNode = async (id) => {
@@ -390,47 +368,9 @@ export default function ClusterSettings() {
 
       <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
         <h3 style={{ marginTop: 0 }}>Cluster Nodes</h3>
-        
-        <div style={{ padding: '15px', background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
-          <h4 style={{ marginTop: 0, fontSize: '1.1em', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
-            <Settings size={18} /> Register New Node
-          </h4>
-          <form onSubmit={handleAddNode} style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', alignItems: 'flex-end' }}>
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Node Name</label>
-              <input
-                type="text"
-                value={newNodeName}
-                onChange={e => setNewNodeName(e.target.value)}
-                placeholder="e.g. worker-01"
-                style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
-                required
-              />
-            </div>
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={{ display: 'block', fontSize: '0.85em', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>IP Address</label>
-              <input
-                type="text"
-                value={newNodeIp}
-                onChange={e => setNewNodeIp(e.target.value)}
-                placeholder="e.g. 192.168.1.100"
-                style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              style={{
-                background: '#3b82f6', color: 'white', border: 'none', padding: '10px 20px',
-                borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px'
-              }}
-            >
-              <Plus size={18} /> Add Node
-            </button>
-          </form>
-        </div>
+        <p style={{ color: '#64748b', fontSize: '0.9em' }}>Nodes register automatically during setup. Rename or remove them here.</p>
 
-        <table style={{ width: '100%', borderCollapse: 'collapse', background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', background: 'white', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e2e8f0', marginTop: '15px' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em', background: '#f8fafc' }}>
               <th style={{ padding: '12px 10px' }}>Name</th>

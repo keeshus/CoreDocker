@@ -13,15 +13,25 @@ const mockDb = {
   }),
 };
 
+vi.mock('../../backend/utils/locks.js', () => ({
+  withContainerLock: (_id, cb) => cb(),
+}));
+
+vi.mock('../../backend/config.js', () => ({
+  nodeId: 'test-node',
+}));
+
 vi.mock('../../backend/services/db.js', () => {
   const mockEtcd = {
     put: vi.fn().mockReturnThis(),
     get: vi.fn(),
-    election: vi.fn(),
+    election: vi.fn().mockReturnValue({ campaign: vi.fn(() => ({ on: vi.fn() })) }),
+    lease: vi.fn().mockReturnValue({ grant: vi.fn().mockResolvedValue({ ID: '1' }) }),
+    value: vi.fn().mockReturnThis(),
     getAll: vi.fn(),
   };
   return {
-    default: mockEtcd,
+    etcd: mockEtcd,
     getContainers: () => mockDb.getContainers(),
     getNodes: () => mockDb.getNodes(),
     saveContainer: (id, name, config, status, dockerId, nodeId) =>

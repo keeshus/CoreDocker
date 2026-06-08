@@ -11,6 +11,15 @@ vi.mock('../../backend/services/secrets.js', () => ({
   getSecret: (key) => mockGetSecret(key),
 }));
 
+// Mock fs sync operations used for writing secret files
+vi.mock('fs', () => ({
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+  existsSync: vi.fn(() => false),
+  chmodSync: vi.fn(),
+}));
+
 const { buildCreateOpts } = await import('../../backend/utils/docker-opts.js');
 
 beforeEach(() => {
@@ -87,14 +96,20 @@ describe('buildCreateOpts - environment variables', () => {
     expect(result.Env).toContain('DEBUG=false');
   });
 
-  it('resolves {{SECRET:key}} syntax', async () => {
+  it('mounts secrets as files instead of plaintext env vars', async () => {
     mockGetSecret.mockResolvedValue('resolved-secret-value');
 
     const env = [
       { key: 'DB_PASSWORD', value: '{{SECRET:db-pass}}' },
     ];
     const result = await buildCreateOpts('app', 'node:18', env, [], [], 'always', {});
-    expect(result.Env).toContain('DB_PASSWORD=resolved-secret-value');
+    // Secret is NOT exposed as plaintext env var anymore
+    expect(result.Env).not.toContain('DB_PASSWORD=resolved-secret-value');
+    // Instead, a _FILE env var points to the mounted secret
+    expect(result.Env).toContain('DB_PASSWORD_FILE=/run/secrets/db-pass');
+    // The bind mount for the secret file is added
+    const bind = result.HostConfig.Binds.find(b => b.includes('/run/secrets/db-pass'));
+    expect(bind).toBeTruthy();
     expect(mockGetSecret).toHaveBeenCalledWith('db-pass');
   });
 
@@ -110,12 +125,14 @@ describe('buildCreateOpts - environment variables', () => {
 });
 
 describe('buildCreateOpts - volumes', () => {
-  it('uses direct host paths for non-backup type', async () => {
+  it('builds bind mount for non-backup volumes', async () => {
     const volumes = [
-      { host: '/data/custom', container: '/app/data' },
+      { type: 'non-backup', host: 'custom', container: '/app/data' },
     ];
     const result = await buildCreateOpts('app', 'node:18', [], volumes, [], 'always', {});
-    expect(result.HostConfig.Binds).toContain('/data/custom:/app/data');
+    const bind = result.HostConfig.Binds[0];
+    expect(bind).toContain(':');
+    expect(bind.endsWith(':/app/data')).toBe(true);
   });
 });
 

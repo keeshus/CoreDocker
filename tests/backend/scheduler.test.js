@@ -44,7 +44,7 @@ const mockDbDefault = {
 };
 
 vi.mock('../../backend/services/db.js', () => ({
-  default: mockDbDefault,
+  etcd: mockDbDefault,
   getContainers: vi.fn().mockResolvedValue([]),
   getNodes: vi.fn().mockResolvedValue([]),
   saveContainer: vi.fn().mockResolvedValue(),
