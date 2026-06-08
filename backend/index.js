@@ -647,12 +647,12 @@ const shutdown = (signal) => {
   isShuttingDown = true;
   console.log(`${signal} received. Shutting down gracefully...`);
 
-  // Hard safety net: exit no matter what after 25s (compose grace period is 30s)
+  // Hard safety net: exit no matter what. Must NOT use unref() — the timer
+  // keeps the event loop alive until cleanup starts its Docker API calls.
   const hardExit = setTimeout(() => {
     console.error('Shutdown timed out — forcing exit.');
     process.exit(1);
   }, 55000);
-  hardExit.unref();
 
   (async () => {
     try {
