@@ -222,7 +222,7 @@ export default function ClusterSettings() {
             value={settings.dnsVipInterface}
             onChange={e => setSettings({...settings, dnsVipInterface: e.target.value})}
             placeholder="e.g. eth0 (leave empty for auto-detect)"
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
           />
           <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Physical interface for the DNS VIP (auto-detected from node IP if left empty).</small>
         </div>
@@ -234,7 +234,7 @@ export default function ClusterSettings() {
             value={settings.dnsForwarder}
             onChange={e => setSettings({...settings, dnsForwarder: e.target.value})}
             placeholder="e.g. 192.168.1.1 (your router/gateway)"
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
           />
           <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Upstream DNS server CoreDNS forwards unresolved queries to.</small>
         </div>
@@ -246,7 +246,7 @@ export default function ClusterSettings() {
             value={settings.dnsVip}
             onChange={e => setSettings({...settings, dnsVip: e.target.value})}
             placeholder="e.g. 10.0.0.53"
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
           />
           <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Static IP used by your router for DNS. Managed via Keepalived on up to 3 nodes.</small>
         </div>
@@ -260,7 +260,7 @@ export default function ClusterSettings() {
               value={settings.sshUser}
               onChange={e => setSettings({...settings, sshUser: e.target.value})}
               placeholder="e.g. coredocker"
-              style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+              style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
             />
             <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Non-root SSH user for HA folder sync across nodes. The user's ~/.ssh/authorized_keys is managed automatically.</small>
           </div>
@@ -276,7 +276,7 @@ export default function ClusterSettings() {
                 value={settings.resticS3Endpoint}
                 onChange={e => setSettings({...settings, resticS3Endpoint: e.target.value})}
                 placeholder="e.g. s3.eu-central-1.wasabisys.com"
-                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
               />
             </div>
             <div>
@@ -286,7 +286,7 @@ export default function ClusterSettings() {
                 value={settings.resticS3Bucket}
                 onChange={e => setSettings({...settings, resticS3Bucket: e.target.value})}
                 placeholder="e.g. my-backup-bucket"
-                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
               />
             </div>
           </div>
@@ -302,7 +302,7 @@ export default function ClusterSettings() {
                   value={credentials['restic-password']}
                   onChange={e => setCredentials({...credentials, 'restic-password': e.target.value})}
                   placeholder="Restic encryption password"
-                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
                 />
               </div>
               <div>
@@ -312,7 +312,7 @@ export default function ClusterSettings() {
                   value={credentials['restic-access-key']}
                   onChange={e => setCredentials({...credentials, 'restic-access-key': e.target.value})}
                   placeholder="S3 access key"
-                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
                 />
               </div>
               <div>
@@ -322,7 +322,7 @@ export default function ClusterSettings() {
                   value={credentials['restic-secret-key']}
                   onChange={e => setCredentials({...credentials, 'restic-secret-key': e.target.value})}
                   placeholder="S3 secret key"
-                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
                 />
               </div>
             </div>
@@ -339,7 +339,7 @@ export default function ClusterSettings() {
                 value={credentials['cert-domain']}
                 onChange={e => setCredentials({...credentials, 'cert-domain': e.target.value})}
                 placeholder="e.g. example.com"
-                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
               />
               <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Stored as encrypted secret.</small>
             </div>
@@ -350,7 +350,7 @@ export default function ClusterSettings() {
                 value={credentials['cert-cloudflare-token']}
                 onChange={e => setCredentials({...credentials, 'cert-cloudflare-token': e.target.value})}
                 placeholder="Cloudflare API token"
-                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
               />
               <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Stored as encrypted secret.</small>
             </div>
@@ -467,7 +467,7 @@ export default function ClusterSettings() {
                 type="password" 
                 value={passwords.current} 
                 onChange={e => setPasswords({...passwords, current: e.target.value})}
-                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
                 required
               />
             </div>
@@ -478,7 +478,7 @@ export default function ClusterSettings() {
                 type="password" 
                 value={passwords.next} 
                 onChange={e => setPasswords({...passwords, next: e.target.value})}
-                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
                 required
               />
             </div>
@@ -489,7 +489,7 @@ export default function ClusterSettings() {
                 type="password" 
                 value={passwords.confirm} 
                 onChange={e => setPasswords({...passwords, confirm: e.target.value})}
-                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
                 required
               />
             </div>
@@ -551,7 +551,7 @@ export default function ClusterSettings() {
               value={dekPassword}
               onChange={e => setDekPassword(e.target.value)}
               placeholder="Master Password"
-              style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', marginBottom: '15px', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box', marginBottom: '15px', boxSizing: 'border-box' }}
               autoFocus
             />
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
