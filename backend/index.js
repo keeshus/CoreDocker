@@ -48,6 +48,7 @@ const port = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 let JWT_SECRET = null;
+let isShuttingDown = false;
 const nodeName = process.env.NODE_NAME || 'node-1';
 const nodeIp = process.env.NODE_IP || '127.0.0.1';
 const clientIp = process.env.NODE_CLIENT_IP || nodeIp;
@@ -609,7 +610,7 @@ const stopSystemContainers = async () => {
   try {
     const containers = await docker.listContainers({ all: true });
     const cleanup = containers
-      .filter(c => c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend')
+      .filter(c => c.Names[0].startsWith('/core-docker-') && c.Names[0] !== '/core-docker-backend' && c.Names[0] !== '/core-docker-frontend')
       .map(async c => {
         console.log(`Cleaning up container ${c.Names[0]}...`);
         try {
