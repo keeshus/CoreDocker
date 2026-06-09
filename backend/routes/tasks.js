@@ -105,6 +105,8 @@ router.get('/:id/logs', async (req, res) => {
   try {
     const { id } = req.params;
     const selectedNode = req.query.node;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
 
     // If requesting logs from another node, proxy the request
     if (selectedNode && await proxyLogsToNode(req, res, selectedNode)) return;
@@ -112,36 +114,44 @@ router.get('/:id/logs', async (req, res) => {
     const taskLogDir = path.join(TASK_LOG_DIR, id);
 
     if (!fs.existsSync(taskLogDir)) {
-      return res.json([]);
+      return res.json({ files: [], total: 0, page, limit, totalPages: 0 });
     }
+
+    let allFiles;
 
     // Single node: list only from that node's directory
     if (selectedNode) {
       const nodeDir = path.join(taskLogDir, selectedNode);
-      if (!fs.existsSync(nodeDir)) return res.json([]);
+      if (!fs.existsSync(nodeDir)) {
+        return res.json({ files: [], total: 0, page, limit, totalPages: 0 });
+      }
 
-      const files = fs.readdirSync(nodeDir)
+      allFiles = fs.readdirSync(nodeDir)
         .filter(f => f.endsWith('.log'))
         .map(f => buildLogEntry(nodeDir, f, selectedNode))
         .sort((a, b) => b.mtime - a.mtime);
-      return res.json(files);
+    } else {
+      // All nodes: merge logs from every node subdirectory
+      const nodeDirs = fs.readdirSync(taskLogDir, { withFileTypes: true })
+        .filter(d => d.isDirectory());
+
+      allFiles = [];
+      for (const dirent of nodeDirs) {
+        const nodeDir = path.join(taskLogDir, dirent.name);
+        const logs = fs.readdirSync(nodeDir)
+          .filter(f => f.endsWith('.log'))
+          .map(f => buildLogEntry(nodeDir, f, dirent.name));
+        allFiles.push(...logs);
+      }
+      allFiles.sort((a, b) => b.mtime - a.mtime);
     }
 
-    // All nodes: merge logs from every node subdirectory
-    const nodeDirs = fs.readdirSync(taskLogDir, { withFileTypes: true })
-      .filter(d => d.isDirectory());
+    const total = allFiles.length;
+    const totalPages = Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const files = allFiles.slice(start, start + limit);
 
-    const allFiles = [];
-    for (const dirent of nodeDirs) {
-      const nodeDir = path.join(taskLogDir, dirent.name);
-      const logs = fs.readdirSync(nodeDir)
-        .filter(f => f.endsWith('.log'))
-        .map(f => buildLogEntry(nodeDir, f, dirent.name));
-      allFiles.push(...logs);
-    }
-
-    allFiles.sort((a, b) => b.mtime - a.mtime);
-    res.json(allFiles);
+    res.json({ files, total, page, limit, totalPages });
   } catch (err) {
     res.status(500).json({ error: err.message, code: 'TASK_LOGS_LIST_FAILED' });
   }

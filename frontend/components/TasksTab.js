@@ -97,19 +97,56 @@ export default function TasksTab() {
     }, 3000);
   };
 
+  const LOGS_PER_PAGE = 10;
+
   const loadTaskLogs = async (taskId, force = false) => {
     if (!force && taskLogs[taskId]) return;
     const node = selectedNodeRef.current;
     setLoadingLogs(prev => ({ ...prev, [taskId]: true }));
     try {
-      const nodeParam = node ? `?node=${node}` : '';
-      const res = await fetch(`/api/tasks/${taskId}/logs${nodeParam}`);
+      const nodeParam = node ? `&node=${node}` : '';
+      const res = await fetch(`/api/tasks/${taskId}/logs?page=1&limit=${LOGS_PER_PAGE}${nodeParam}`);
       if (res.ok) {
         const data = await res.json();
-        setTaskLogs(prev => ({ ...prev, [taskId]: data }));
+        // Handle both paginated response and legacy flat array
+        if (Array.isArray(data)) {
+          setTaskLogs(prev => ({ ...prev, [taskId]: { files: data, total: data.length, page: 1, totalPages: 1 } }));
+        } else {
+          setTaskLogs(prev => ({ ...prev, [taskId]: data }));
+        }
       }
     } catch (e) {
       console.error('Failed to load task logs:', e);
+    } finally {
+      setLoadingLogs(prev => ({ ...prev, [taskId]: false }));
+    }
+  };
+
+  const loadMoreLogs = async (taskId) => {
+    const current = taskLogs[taskId];
+    if (!current || current.page >= current.totalPages) return;
+
+    const node = selectedNodeRef.current;
+    const nextPage = current.page + 1;
+    setLoadingLogs(prev => ({ ...prev, [taskId]: true }));
+    try {
+      const nodeParam = node ? `&node=${node}` : '';
+      const res = await fetch(`/api/tasks/${taskId}/logs?page=${nextPage}&limit=${LOGS_PER_PAGE}${nodeParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        const newData = Array.isArray(data) ? data : data;
+        setTaskLogs(prev => ({
+          ...prev,
+          [taskId]: {
+            files: [...current.files, ...(newData.files || newData)],
+            total: newData.total || current.total,
+            page: newData.page || nextPage,
+            totalPages: newData.totalPages || current.totalPages,
+          },
+        }));
+      }
+    } catch (e) {
+      console.error('Failed to load more logs:', e);
     } finally {
       setLoadingLogs(prev => ({ ...prev, [taskId]: false }));
     }
@@ -289,11 +326,17 @@ export default function TasksTab() {
 
                     <div style={{ marginTop: '15px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
                       <h4 style={{ margin: '0 0 8px 0', fontSize: '0.95em', color: '#475569' }}>Run History</h4>
+                      {(() => {
+                        const logs = taskLogs[task.id];
+                        const logFiles = logs?.files || (Array.isArray(logs) ? logs : []);
+                        const hasMore = logs?.page < logs?.totalPages;
+
+                        return (<>
                       {loadingLogs[task.id] ? (
                         <div style={{ color: '#94a3b8', fontSize: '0.85em' }}>Loading logs...</div>
-                      ) : taskLogs[task.id] && taskLogs[task.id].length > 0 ? (
-                        <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                          {taskLogs[task.id].map(log => (
+                      ) : logFiles.length > 0 ? (
+                        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                          {logFiles.map(log => (
                             <div key={log.filename}>
                               <div
                                 onClick={() => loadLogContent(task.id, log.filename, log.nodeId)}
@@ -328,6 +371,29 @@ export default function TasksTab() {
                       ) : (
                         <div style={{ color: '#94a3b8', fontSize: '0.85em' }}>No run logs yet.</div>
                       )}
+
+                      {logs && logs.totalPages > 1 && (
+                        <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>
+                            Showing {logFiles.length} of {logs.total} runs
+                          </span>
+                          {logs.page < logs.totalPages && (
+                            <button
+                              onClick={() => loadMoreLogs(task.id)}
+                              disabled={loadingLogs[task.id]}
+                              style={{
+                                padding: '4px 12px', fontSize: '0.8em', cursor: 'pointer',
+                                background: '#f1f5f9', color: '#3b82f6', border: '1px solid #e2e8f0',
+                                borderRadius: '4px', fontWeight: 'bold',
+                              }}
+                            >
+                              {loadingLogs[task.id] ? 'Loading...' : 'Load more'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      </>);
+                    })()}
                     </div>
                   </td>
                 </tr>
