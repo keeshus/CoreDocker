@@ -135,7 +135,7 @@ export default function TasksTab() {
   };
 
   const loadMoreLogs = async (taskId) => {
-    const current = taskLogs[taskId];
+    const current = taskLogsRef.current[taskId];
     if (!current || current.page >= current.totalPages) return;
 
     const node = selectedNodeRef.current;
@@ -146,16 +146,22 @@ export default function TasksTab() {
       const res = await fetch(`/api/tasks/${taskId}/logs?page=${nextPage}&limit=${LOGS_PER_PAGE}${nodeParam}`);
       if (res.ok) {
         const data = await res.json();
-        const newData = Array.isArray(data) ? data : data;
-        setTaskLogs(prev => ({
-          ...prev,
-          [taskId]: {
-            files: [...current.files, ...(newData.files || newData)],
-            total: newData.total || current.total,
-            page: newData.page || nextPage,
-            totalPages: newData.totalPages || current.totalPages,
-          },
-        }));
+        // Handle both paginated response {files,total,page,totalPages} and legacy flat array
+        const newFiles = data.files || (Array.isArray(data) ? data : []);
+        const newTotal = data.total || newFiles.length;
+        const newTotalPages = data.totalPages || 1;
+        setTaskLogs(prev => {
+          const cur = prev[taskId];
+          return {
+            ...prev,
+            [taskId]: {
+              files: [...(cur?.files || []), ...newFiles],
+              total: newTotal,
+              page: nextPage,
+              totalPages: newTotalPages,
+            },
+          };
+        });
       }
     } catch (e) {
       console.error('Failed to load more logs:', e);

@@ -177,10 +177,10 @@ if (hasSecrets) {
   if (opts.shmSize) {
     let bytes;
     const str = opts.shmSize.toString().toLowerCase().trim();
-    if (str.endsWith('g')) bytes = parseInt(str) * 1024 * 1024 * 1024;
-    else if (str.endsWith('m')) bytes = parseInt(str) * 1024 * 1024;
-    else if (str.endsWith('k')) bytes = parseInt(str) * 1024;
-    else bytes = parseInt(str) || 0;
+    if (str.endsWith('g')) bytes = parseInt(str, 10) * 1024 * 1024 * 1024;
+    else if (str.endsWith('m')) bytes = parseInt(str, 10) * 1024 * 1024;
+    else if (str.endsWith('k')) bytes = parseInt(str, 10) * 1024;
+    else bytes = parseInt(str, 10) || 0;
     if (bytes > 0) createOpts.HostConfig.ShmSize = bytes;
   }
 
