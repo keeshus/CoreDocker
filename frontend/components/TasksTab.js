@@ -102,17 +102,26 @@ export default function TasksTab() {
   const loadTaskLogs = async (taskId, force = false) => {
     if (!force && taskLogs[taskId]) return;
     const node = selectedNodeRef.current;
+    // Preserve previously loaded pages during force-refresh so Load More
+    // items don't disappear when the 10s auto-refresh fires
+    const prevExtra = force && taskLogs[taskId]?.files
+      ? taskLogs[taskId].files.slice(LOGS_PER_PAGE) : [];
     setLoadingLogs(prev => ({ ...prev, [taskId]: true }));
     try {
       const nodeParam = node ? `&node=${node}` : '';
       const res = await fetch(`/api/tasks/${taskId}/logs?page=1&limit=${LOGS_PER_PAGE}${nodeParam}`);
       if (res.ok) {
         const data = await res.json();
-        // Handle both paginated response and legacy flat array
         if (Array.isArray(data)) {
           setTaskLogs(prev => ({ ...prev, [taskId]: { files: data, total: data.length, page: 1, totalPages: 1 } }));
         } else {
-          setTaskLogs(prev => ({ ...prev, [taskId]: data }));
+          setTaskLogs(prev => ({
+            ...prev,
+            [taskId]: {
+              ...data,
+              files: [...(data.files || []), ...prevExtra],
+            },
+          }));
         }
       }
     } catch (e) {
