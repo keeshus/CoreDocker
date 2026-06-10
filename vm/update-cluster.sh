@@ -119,7 +119,7 @@ for node_name in "${TARGET_NODES[@]}"; do
        sudo rm /tmp/coredocker-update.tar.gz && \
        cd $REPO_DIR && \
        sudo sed -i 's|^HOST_BACKUP_PATH=.*|HOST_BACKUP_PATH=${REPO_DIR}/data/backup|; s|^HOST_NONBACKUP_PATH=.*|HOST_NONBACKUP_PATH=${REPO_DIR}/data/nonbackup|; s|^HOST_CERTS_PATH=.*|HOST_CERTS_PATH=${REPO_DIR}/nginx/ssl|; s|^NODE_IP=.*|NODE_IP=${backhaul_ip}|; s|^NODE_CLIENT_IP=.*|NODE_CLIENT_IP=${node_ip}|' .env && \
-       sudo docker rm -f core-docker-backend core-docker-frontend 2>/dev/null; \
+       sudo docker rm -f core-docker-backend core-docker-frontend core-docker-proxy core-docker-coredns core-docker-keepalived-dns 2>/dev/null; \
        sudo docker compose up -d --build 2>&1" | sed "s/^/  [$node_name] /"
   fi
 
