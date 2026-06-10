@@ -163,6 +163,30 @@ export const registerLocalNode = async (nodeId, name, ip, clientIp) => {
   };
   // Nodes are NOT encrypted, they use NODE_PREFIX which does not start with core/
   await nodeLease.put(`${NODE_PREFIX}${nodeId}`).value(JSON.stringify(node));
+
+  // Write DNS entries to SkyDNS so CoreDNS picks them up immediately
+  // (no need to wait for the 120s reconciler cycle)
+  try {
+    const dnsIp = clientIp || ip;
+    const domains = [`skydns/local/core-docker/${name}`];
+
+    // If clusterDomain is configured, add per-node subdomain
+    const settingsStr = await etcd.get('cluster/settings').string().catch(() => null);
+    if (settingsStr) {
+      const settings = JSON.parse(settingsStr);
+      if (settings.clusterDomain) {
+        const parts = settings.clusterDomain.split('.').reverse();
+        domains.push(`skydns/${parts.join('/')}/${name}`);
+      }
+    }
+
+    for (const dnsKey of domains) {
+      await etcd.put(dnsKey).value(JSON.stringify({ host: dnsIp }));
+    }
+  } catch (e) {
+    console.warn(`[DB] Failed to write SkyDNS entries for node ${name}: ${e.message}`);
+  }
+
   console.log(`Node ${nodeId} registered with lease (Sealed: ${node.sealed}).`);
 };
 
@@ -190,6 +214,25 @@ export const saveNode = async (id, name, ip, status = 'offline', clientIp) => {
 };
 
 export const deleteNode = async (id) => {
+  // Clean up SkyDNS entries
+  try {
+    const nodeData = await db.get(`${NODE_PREFIX}${id}`);
+    if (nodeData) {
+      const node = JSON.parse(nodeData);
+      await etcd.delete().key(`skydns/local/core-docker/${node.name}`);
+      const settingsStr = await etcd.get('cluster/settings').string().catch(() => null);
+      if (settingsStr) {
+        const settings = JSON.parse(settingsStr);
+        if (settings.clusterDomain) {
+          const parts = settings.clusterDomain.split('.').reverse();
+          await etcd.delete().key(`skydns/${parts.join('/')}/${node.name}`);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[DB] Failed to clean up SkyDNS for node ${id}: ${e.message}`);
+  }
+
   await db.delete(`${NODE_PREFIX}${id}`);
 };
 

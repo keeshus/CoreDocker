@@ -3,10 +3,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const etcdStore = {};
 const mockLease = {
   put: vi.fn().mockReturnThis(),
-  value: vi.fn().mockResolvedValue(),
+  value: vi.fn((val) => {
+    // Track the lease key so deleteNode can find it
+    const leaseKey = mockLease._lastKey;
+    if (leaseKey) etcdStore[leaseKey] = val;
+    return Promise.resolve();
+  }),
   on: vi.fn().mockReturnThis(),
   revoke: vi.fn().mockResolvedValue(),
+  _lastKey: null,
 };
+// Monkey-patch lease.put to store the key
+const origLeasePut = mockLease.put;
+mockLease.put = vi.fn((key) => {
+  mockLease._lastKey = key;
+  return mockLease;
+});
 
 let mockPutImpl = vi.fn((key) => ({
   value: (val) => {
@@ -41,6 +53,7 @@ const mockEtcd3 = {
   getAll: function() { return mockGetAllImpl(); },
   lease: vi.fn(() => mockLease),
   close: vi.fn(),
+  namespace: vi.fn((_ns) => mockEtcd3),
 };
 
 const mockOs = {
@@ -121,6 +134,64 @@ describe('registerLocalNode', () => {
     await registerLocalNode('node-1', 'Primary', '192.168.1.10');
     expect(mockEtcd3.lease).toHaveBeenCalledWith(30);
     expect(mockLease.put).toHaveBeenCalledWith('nodes/node-1');
+  });
+
+  it('writes node to SkyDNS on registration', async () => {
+    await registerLocalNode('node-2', 'worker-east', '10.0.0.5');
+
+    const dnsKey = 'skydns/local/core-docker/worker-east';
+    const dnsEntry = JSON.parse(etcdStore[dnsKey]);
+    expect(dnsEntry).toBeDefined();
+    expect(dnsEntry.host).toBe('10.0.0.5');
+  });
+
+  it('uses clientIp for SkyDNS when provided', async () => {
+    await registerLocalNode('node-3', 'worker-west', '10.0.0.6', '192.168.100.6');
+
+    const dnsEntry = JSON.parse(etcdStore['skydns/local/core-docker/worker-west']);
+    expect(dnsEntry.host).toBe('192.168.100.6');
+  });
+
+  it('writes cluster domain SkyDNS entries when clusterDomain is set', async () => {
+    etcdStore['cluster/settings'] = JSON.stringify({
+      clusterDomain: 'cluster.example.com',
+    });
+
+    await registerLocalNode('node-4', 'node-eu', '10.0.0.7');
+
+    const clusterDnsKey = 'skydns/com/example/cluster/node-eu';
+    const dnsEntry = JSON.parse(etcdStore[clusterDnsKey]);
+    expect(dnsEntry).toBeDefined();
+    expect(dnsEntry.host).toBe('10.0.0.7');
+  });
+
+  it('does not crash when cluster settings are missing', async () => {
+    await expect(
+      registerLocalNode('node-5', 'solo', '10.0.0.8')
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('SkyDNS lifecycle', () => {
+  it('registerLocalNode writes core-docker.local SkyDNS entry', async () => {
+    await registerLocalNode('n1', 'test-node', '10.0.0.1');
+    const entry = JSON.parse(etcdStore['skydns/local/core-docker/test-node']);
+    expect(entry.host).toBe('10.0.0.1');
+  });
+
+  it('registerLocalNode writes cluster domain SkyDNS when configured', async () => {
+    etcdStore['cluster/settings'] = JSON.stringify({ clusterDomain: 'cluster.example.com' });
+    await registerLocalNode('n2', 'node-eu', '10.0.0.2');
+    const entry = JSON.parse(etcdStore['skydns/com/example/cluster/node-eu']);
+    expect(entry.host).toBe('10.0.0.2');
+  });
+
+  it('derives SkyDNS key by reversing cluster domain parts', () => {
+    const domain = 'cluster.example.com';
+    const parts = domain.split('.').reverse();
+    expect(parts).toEqual(['com', 'example', 'cluster']);
+    const key = 'skydns/' + parts.join('/') + '/my-node';
+    expect(key).toBe('skydns/com/example/cluster/my-node');
   });
 });
 
