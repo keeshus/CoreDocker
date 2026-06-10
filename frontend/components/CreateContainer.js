@@ -25,6 +25,8 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     devices: '',
     privileged: false,
     internetAccess: false,
+    ha: false,
+    ha_allowed_nodes: '',
     current_node: ''
   };
 
@@ -206,6 +208,30 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
                 <span style={{ fontWeight: 'bold', color: '#475569', fontSize: '0.9em' }}>Internet connected</span>
               </label>
               <small style={{ color: '#64748b', marginLeft: '25px', marginTop: '-10px' }}>When unchecked, the container runs in an isolated network without external internet access.</small>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={formData.ha}
+                  onChange={e => setFormData({...formData, ha: e.target.checked})}
+                />
+                <span style={{ fontWeight: 'bold', color: '#475569', fontSize: '0.9em' }}>High Availability</span>
+              </label>
+              <small style={{ color: '#64748b', marginLeft: '25px', marginTop: '-10px' }}>When enabled, the orchestrator reschedules this container to another node if its current host fails.</small>
+
+              {formData.ha && (
+                <div style={{ marginLeft: '25px', marginTop: '10px' }}>
+                  <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', fontSize: '0.9em' }}>Allowed Nodes (comma-separated IDs, optional)</label>
+                  <input
+                    type="text"
+                    value={formData.ha_allowed_nodes}
+                    onChange={e => setFormData({...formData, ha_allowed_nodes: e.target.value})}
+                    placeholder="e.g. node-1, node-2"
+                    style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
+                  />
+                  <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Leave empty to allow any node.</small>
+                </div>
+              )}
 
               <details>
                 <summary style={{ fontWeight: 'bold', cursor: 'pointer', padding: '10px', background: '#f1f5f9', borderRadius: '4px' }}>Proxy Settings (Nginx)</summary>

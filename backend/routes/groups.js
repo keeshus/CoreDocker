@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, config = { highAvailability: false, targetNodes: [], internetAccess: false } } = req.body;
+    const { name, config = { highAvailability: false, internetAccess: false } } = req.body;
     if (!name) return res.status(400).json({ error: 'Group name is required', code: 'VALIDATION_ERROR' });
 
     const id = uuidv4();

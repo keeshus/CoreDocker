@@ -34,6 +34,7 @@ vi.mock('../../backend/services/db.js', () => {
     etcd: mockEtcd,
     getContainers: () => mockDb.getContainers(),
     getNodes: () => mockDb.getNodes(),
+    getGroups: vi.fn().mockResolvedValue([]),
     saveContainer: (id, name, config, status, dockerId, nodeId) =>
       mockDb.saveContainer(id, name, config, status, dockerId, nodeId),
   };

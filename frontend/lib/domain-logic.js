@@ -64,6 +64,11 @@ export function buildContainerPayload(formData) {
     payload.proxy.port = parseInt(payload.proxy.port, 10);
   }
 
+  // Convert ha_allowed_nodes from comma-separated string to array
+  if (typeof payload.ha_allowed_nodes === 'string') {
+    payload.ha_allowed_nodes = parseHaAllowedNodes(payload.ha_allowed_nodes);
+  }
+
   return payload;
 }
 

@@ -1,4 +1,4 @@
-import { etcd, getContainers, getNodes, saveContainer } from './db.js';
+import { etcd, getContainers, getGroups, getNodes, saveContainer } from './db.js';
 import { withContainerLock } from '../utils/locks.js';
 
 const ORCHESTRATOR_LOCK_KEY = 'leader/orchestrator';
@@ -9,9 +9,14 @@ export const runOrchestrationLoop = async () => {
     const nodes = await getNodes();
     const aliveNodeIds = nodes.map(n => n.id);
     const containers = await getContainers();
+    const groups = await getGroups();
+
+    // Build a map of group name → highAvailability for quick lookup
+    const haGroups = new Set(groups.filter(g => g.config?.highAvailability).map(g => g.name));
 
     for (const container of containers) {
-      if (container.config?.ha && container.status === 'running') {
+      const isHA = container.config?.ha || (container.config?.group && haGroups.has(container.config.group));
+      if (isHA && container.status === 'running') {
         const isOrphaned = !aliveNodeIds.includes(container.current_node);
         
         if (isOrphaned) {

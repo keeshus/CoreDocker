@@ -395,9 +395,16 @@ async function performHASync() {
 
   // 5. Rsync HA containers to other nodes
   const allContainers = await etcd.getAll().prefix('core/containers/').strings();
+  const allGroups = await etcd.getAll().prefix('core/groups/').strings();
+  const haGroups = new Set(
+    Object.values(allGroups)
+      .map(v => { try { return JSON.parse(v); } catch { return null; } })
+      .filter(g => g?.config?.highAvailability)
+      .map(g => g.name)
+  );
   const haContainers = Object.entries(allContainers)
     .map(([, value]) => JSON.parse(value))
-    .filter(c => c.config?.ha && c.current_node === nodeId);
+    .filter(c => (c.config?.ha || (c.config?.group && haGroups.has(c.config.group))) && c.current_node === nodeId);
 
   if (haContainers.length === 0) {
     return { stdout: `HA Sync: No HA containers assigned to this node. SSH keys configured for ${otherNodes.length} peer(s).`, exitCode: 0 };
