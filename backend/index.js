@@ -181,8 +181,8 @@ async function recordFailedAttempt(ip) {
     entry.count += 1;
     entry.lastAttempt = Date.now();
     const ttl = Math.min(Math.pow(2, entry.count), BRUTE_LOCKOUT_CAP_MIN) * 60;
-    await etcd.put(`${BRUTE_KEY_PREFIX}${ip}`).value(JSON.stringify(entry));
-    // Set TTL so the lockout record auto-clears
+    // Use lease.put directly (not plain put first) so the entry auto-clears.
+    // If lease creation fails, the old entry (if any) stays until its own TTL expires.
     const lease = etcd.lease(ttl);
     await lease.put(`${BRUTE_KEY_PREFIX}${ip}`).value(JSON.stringify(entry));
   } catch (e) { console.error('[BruteForce] Failed to record attempt:', e.message); }

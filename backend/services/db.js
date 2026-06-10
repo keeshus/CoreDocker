@@ -132,6 +132,7 @@ const NODE_PREFIX = 'nodes/';
 const GROUPS_PREFIX = 'core/groups/';
 
 let nodeLease = null;
+let _leaseReconnectTimer = null;
 
 export const registerLocalNode = async (nodeId, name, ip, clientIp) => {
   if (nodeLease) {
@@ -144,8 +145,12 @@ export const registerLocalNode = async (nodeId, name, ip, clientIp) => {
 
   nodeLease = etcd.lease(30); // 30 second TTL
   nodeLease.on('lost', () => {
-    console.error('Node lease lost, re-registering...');
-    registerLocalNode(nodeId, name, ip, clientIp);
+    if (_leaseReconnectTimer) return; // debounce — already scheduling a reconnect
+    console.error('Node lease lost, re-registering in 5s...');
+    _leaseReconnectTimer = setTimeout(() => {
+      _leaseReconnectTimer = null;
+      registerLocalNode(nodeId, name, ip, clientIp);
+    }, 5000);
   });
 
   const node = {

@@ -222,23 +222,27 @@ export const bootstrapEtcd = async () => {
       console.log('[ETCD] Existing container found, checking health...');
     }
 
-    // Verify etcd is actually responsive — a running container doesn't
-    // guarantee a working etcd process inside. Use auth creds if available.
-    try {
-      const authArgs = getAuthArgs();
-      const healthCmd = ['etcdctl', ...authArgs, 'endpoint', 'health'];
-      const healthy = await execWithTimeout(container, healthCmd, 10000);
-      if (healthy) {
-        console.log('[ETCD] Existing container is healthy, reusing.');
-        return true;
+    // Verify etcd is actually responsive — retry a few times to tolerate
+    // transient CPU spikes or network glitches before concluding it's dead.
+    const authArgs = getAuthArgs();
+    const healthCmd = ['etcdctl', ...authArgs, 'endpoint', 'health'];
+    let healthy = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        healthy = await execWithTimeout(container, healthCmd, 10000);
+        if (healthy) break;
+      } catch (e) {
+        console.warn(`[ETCD] Health check attempt ${attempt + 1} failed: ${e.message}`);
       }
-    } catch (e) {
-      console.warn(`[ETCD] Health check failed: ${e.message}`);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+    }
+    if (healthy) {
+      console.log('[ETCD] Existing container is healthy, reusing.');
+      return true;
     }
 
-    // Container is running but etcd is unresponsive — wipe and recreate.
-    // Stale Raft data can cause phantom peer connections and stuck elections.
-    console.log('[ETCD] Container running but etcd unresponsive, wiping and recreating...');
+    // Container is running but etcd is unresponsive after retries — wipe and recreate.
+    console.log('[ETCD] Container running but etcd unresponsive after retries, wiping and recreating...');
     try {
       await container.stop();
       await container.remove();
