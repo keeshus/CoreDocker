@@ -6,6 +6,8 @@ export default function TasksTab() {
   const [expandedTask, setExpandedTask] = useState(null);
   const expandedRef = useRef(null);
   const [taskLogs, setTaskLogs] = useState({});
+  const taskLogsRef = useRef({});
+  useEffect(() => { taskLogsRef.current = taskLogs; }, [taskLogs]);
   const [loadingLogs, setLoadingLogs] = useState({});
   const [logContent, setLogContent] = useState({});
   const [loadingContent, setLoadingContent] = useState({});
@@ -100,12 +102,13 @@ export default function TasksTab() {
   const LOGS_PER_PAGE = 10;
 
   const loadTaskLogs = async (taskId, force = false) => {
-    if (!force && taskLogs[taskId]) return;
+    const currentLogs = taskLogsRef.current;
+    if (!force && currentLogs[taskId]) return;
     const node = selectedNodeRef.current;
     // Preserve previously loaded pages during force-refresh so Load More
     // items don't disappear when the 10s auto-refresh fires
-    const prevExtra = force && taskLogs[taskId]?.files
-      ? taskLogs[taskId].files.slice(LOGS_PER_PAGE) : [];
+    const prevExtra = force && currentLogs[taskId]?.files
+      ? currentLogs[taskId].files.slice(LOGS_PER_PAGE) : [];
     setLoadingLogs(prev => ({ ...prev, [taskId]: true }));
     try {
       const nodeParam = node ? `&node=${node}` : '';
