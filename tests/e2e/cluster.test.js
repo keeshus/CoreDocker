@@ -79,6 +79,8 @@ describe('Cluster setup', () => {
 // 3. Scheduled tasks
 // ═══════════════════════════════════════════════════════════════════════════
 describe('Scheduled tasks', () => {
+  beforeAll(async () => { await unsealNode('node1', PASSWORD); });
+
   it('lists all default tasks', async () => {
     const { status, data } = await api('node1', '/api/tasks');
     expect(status).toBe(200);
@@ -128,6 +130,8 @@ describe('Scheduled tasks', () => {
 // 4. Settings & secrets
 // ═══════════════════════════════════════════════════════════════════════════
 describe('Settings & secrets', () => {
+  beforeAll(async () => { await unsealNode('node1', PASSWORD); });
+
   it('saves and reads cluster settings', async () => {
     const settings = { dnsForwarder: '1.1.1.1', sshUser: 'coredocker', resticS3Endpoint: 's3.example.com', resticS3Bucket: 'test-bucket' };
     const { status: s } = await api('node1', '/api/settings', { method: 'POST', body: JSON.stringify(settings) });
@@ -153,6 +157,7 @@ describe('Settings & secrets', () => {
   });
 
   it('cross-node settings consistency', async () => {
+    await unsealNode('node2', PASSWORD);
     const { data } = await api('node2', '/api/settings');
     expect(data.resticS3Endpoint).toBe('s3.example.com');
   });

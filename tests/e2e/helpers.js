@@ -45,18 +45,22 @@ export async function api(nodeKey, path, options = {}) {
         let data;
         try { data = JSON.parse(raw); } catch { data = raw; }
 
-        // Capture token from set-cookie
-        const setCookie = res.headers['set-cookie'];
+        // Capture token from set-cookie (Node lowercases headers)
+        const setCookie = res.headers['set-cookie'] || res.headers['Set-Cookie'];
         if (setCookie) {
-          const match = (Array.isArray(setCookie) ? setCookie[0] : setCookie).match(/token=([^;]+)/);
-          if (match) setAuthToken(nodeKey, match[1]);
+          const cookieStr = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+          const match = cookieStr.match(/token=([^;]+)/);
+          if (match) {
+            setAuthToken(nodeKey, match[1]);
+            console.log(`  [auth] token captured for ${nodeKey}`);
+          }
         }
 
         resolve({ status: res.statusCode, data });
       });
     });
     req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.setTimeout(60000, () => { req.destroy(); reject(new Error('Request timeout')); });
     if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
     req.end();
   });
