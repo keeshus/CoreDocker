@@ -11,21 +11,31 @@ export const runOrchestrationLoop = async () => {
     const containers = await getContainers();
     const groups = await getGroups();
 
-    // Build a map of group name → highAvailability for quick lookup
-    const haGroups = new Set(groups.filter(g => g.config?.highAvailability).map(g => g.name));
+    // Build maps of group name → HA config for quick lookup
+    const haGroupNames = new Set(groups.filter(g => g.config?.highAvailability).map(g => g.name));
+    const haGroupAllowedNodes = new Map(
+      groups.filter(g => g.config?.highAvailability && g.config?.ha_allowed_nodes?.length > 0)
+        .map(g => [g.name, g.config.ha_allowed_nodes])
+    );
 
     for (const container of containers) {
-      const isHA = container.config?.ha || (container.config?.group && haGroups.has(container.config.group));
+      const isHA = container.config?.ha || (container.config?.group && haGroupNames.has(container.config.group));
       if (isHA && container.status === 'running') {
         const isOrphaned = !aliveNodeIds.includes(container.current_node);
-        
+
         if (isOrphaned) {
           console.log(`[Orchestrator] Container ${container.name} is orphaned (Host ${container.current_node} died). Rescheduling...`);
-          
-          // 1. Filter allowed nodes
+
+          // 1. Filter allowed nodes (individual first, then group-level)
           let candidates = nodes.filter(n => {
-            if (container.config.ha_allowed_nodes && container.config.ha_allowed_nodes.length > 0) {
-              return container.config.ha_allowed_nodes.includes(n.id);
+            const containerAllowed = container.config.ha_allowed_nodes;
+            const groupAllowed = container.config.group ? haGroupAllowedNodes.get(container.config.group) : null;
+            // Use container-level allowlist if set, otherwise group-level, otherwise all nodes
+            if (containerAllowed && containerAllowed.length > 0) {
+              return containerAllowed.includes(n.id);
+            }
+            if (groupAllowed && groupAllowed.length > 0) {
+              return groupAllowed.includes(n.id);
             }
             return true;
           });

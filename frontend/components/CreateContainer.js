@@ -26,7 +26,7 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
     privileged: false,
     internetAccess: false,
     ha: false,
-    ha_allowed_nodes: '',
+    ha_allowed_nodes: [],
     current_node: ''
   };
 
@@ -221,14 +221,27 @@ export default function CreateContainer({ onCreated, initialData = null, onClose
 
               {formData.ha && (
                 <div style={{ marginLeft: '25px', marginTop: '10px' }}>
-                  <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', fontSize: '0.9em' }}>Allowed Nodes (comma-separated IDs, optional)</label>
-                  <input
-                    type="text"
-                    value={formData.ha_allowed_nodes}
-                    onChange={e => setFormData({...formData, ha_allowed_nodes: e.target.value})}
-                    placeholder="e.g. node-1, node-2"
-                    style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', boxSizing: 'border-box' }}
-                  />
+                  <label style={{ display: 'block', fontSize: '0.9em', fontWeight: 'bold', marginBottom: '5px' }}>Allowed Nodes (optional)</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '150px', overflowY: 'auto', padding: '5px', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'white' }}>
+                    {nodes.map(node => (
+                      <label key={node.id} style={{ display: 'flex', alignItems: 'center', fontSize: '0.9em', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={(formData.ha || []) && Array.isArray(formData.ha_allowed_nodes) && formData.ha_allowed_nodes.includes(node.id)}
+                          onChange={e => {
+                            const selected = Array.isArray(formData.ha_allowed_nodes) ? [...formData.ha_allowed_nodes] : [];
+                            const newSelected = e.target.checked
+                              ? [...selected, node.id]
+                              : selected.filter(id => id !== node.id);
+                            setFormData({...formData, ha_allowed_nodes: newSelected});
+                          }}
+                          style={{ marginRight: '8px' }}
+                        />
+                        {node.name} ({node.ip})
+                      </label>
+                    ))}
+                    {nodes.length === 0 && <span style={{ color: '#94a3b8', fontSize: '0.8em' }}>No other nodes found</span>}
+                  </div>
                   <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>Leave empty to allow any node.</small>
                 </div>
               )}
