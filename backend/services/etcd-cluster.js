@@ -447,37 +447,52 @@ export const bootstrapEtcd = async () => {
  *   allClientUrls: string[] (for ETCD_HOSTS)
  * }
  */
-export const addEtcdMember = async (etcd, nodeName, nodeIp) => {
-  const peerURL = `http://${nodeIp}:2380`;
-  console.log(`[ETCD] Adding member ${nodeName} with peer URL ${peerURL}`);
+export const addEtcdMember = async (nodeName, nodeIp) => {
+  const authArgs = getAuthArgs();
+  const container = docker.getContainer(CONTAINER_NAME);
 
-  // Use etcd3 gRPC client — retry if circuit breaker is open from previous ops
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const resp = await etcd.cluster.memberAdd({ peerURLs: [peerURL] });
-      console.log(`[ETCD] Member added: ${nodeName} (ID: ${resp.member?.ID})`);
-      break;
-    } catch (e) {
-      if (e.message?.includes("already exists") || e.message?.includes("member ID")) {
-        console.log(`[ETCD] Member ${nodeName} already exists, continuing.`);
-        break;
-      }
-      if (attempt < 2) {
-        console.log(`[ETCD] Member add attempt ${attempt + 1} failed: ${e.message}. Retrying in 2s...`);
-        await new Promise(r => setTimeout(r, 2000));
-      } else {
-        throw new Error(`Failed to add etcd member after retries: ${e.message}`);
-      }
-    }
+  console.log(`[ETCD] Adding member ${nodeName} with peer URL http://${nodeIp}:2380`);
+
+  // Single etcdctl call with generous timeout — runs inside the etcd container
+  // via docker exec, bypassing the etcd3 client's circuit breaker
+  const memberAddCmd = [
+    'etcdctl',
+    '--endpoints=127.0.0.1:2379',
+    '--command-timeout=60s',
+    ...authArgs,
+    'member', 'add', nodeName,
+    '--peer-urls', `http://${nodeIp}:2380`,
+  ];
+
+  const { success, output } = await execWithOutput(container, memberAddCmd, 120000);
+
+  if (!success) {
+    const cleanOutput = output.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+    throw new Error(`etcdctl member add failed: ${cleanOutput}`);
   }
 
-  // Get member list via gRPC to build client URLs
+  console.log(`[ETCD] Member added: ${nodeName}`);
+
+  // Get member list to build client URLs
+  const memberListCmd = [
+    'etcdctl',
+    '--endpoints=127.0.0.1:2379',
+    ...authArgs,
+    'member', 'list', '--write-out=json',
+  ];
+
   let allClientUrls = [];
   try {
-    const listResp = await etcd.cluster.memberList();
-    const members = listResp.members || [];
-    allClientUrls = members.map(m => (m.clientURLs && m.clientURLs[0]) || null).filter(Boolean);
-    console.log(`[ETCD] Member list: ${allClientUrls.join(", ")}`);
+    const { success: listSuccess, output: listOutput } = await execWithOutput(container, memberListCmd, 30000);
+    if (listSuccess && listOutput) {
+      const memberList = JSON.parse(listOutput);
+      if (memberList.members) {
+        allClientUrls = memberList.members.map(m => {
+          const url = m.clientURLs && m.clientURLs[0];
+          return url || null;
+        }).filter(Boolean);
+      }
+    }
   } catch (e) {
     console.warn(`[ETCD] Member list error: ${e.message}`);
   }

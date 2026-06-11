@@ -176,7 +176,7 @@ describe('addEtcdMember', () => {
       }),
     }));
 
-    const result = await addEtcdMember(mockDb, 'node-2', '10.0.0.2');
+    const result = await addEtcdMember('node-2', '10.0.0.2');
     expect(result.memberName).toBe('node-2');
     expect(result.initialClusterState).toBe('existing');
     expect(result.allClientUrls).toBeDefined();
