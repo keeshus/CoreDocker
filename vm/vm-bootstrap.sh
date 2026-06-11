@@ -30,6 +30,8 @@ start_coredocker() {
   # Generate .env with absolute paths + backhaul IP for cluster-internal traffic
   sed "s|^HOST_BACKUP_PATH=.*|HOST_BACKUP_PATH=${REPO_DIR}/data/backup|; s|^HOST_NONBACKUP_PATH=.*|HOST_NONBACKUP_PATH=${REPO_DIR}/data/nonbackup|; s|^HOST_CERTS_PATH=.*|HOST_CERTS_PATH=${REPO_DIR}/nginx/ssl|; s|^NODE_IP=.*|NODE_IP=${BACKHAUL_IP}|; s|^NODE_CLIENT_IP=.*|NODE_CLIENT_IP=${PUBLIC_IP}|; s|^NODE_NAME=.*|NODE_NAME=${NODE_NAME}|" .env > .env.vm
   mv .env.vm .env
+  # Create data directories (not included in tarball — each VM starts fresh)
+  mkdir -p "${REPO_DIR}/data/backup/__system__" "${REPO_DIR}/data/nonbackup/__system__"
   log "Starting CoreDocker stack..."
   log "  Backend will bootstrap: ETCD, Nginx proxy, CoreDNS, Keepalived"
   log "  Reconciler, scheduler, and orchestrator will start"

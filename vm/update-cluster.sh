@@ -65,6 +65,7 @@ cd "$PROJECT_DIR"
 tar czf "$TARBALL" \
   --exclude='.git' \
   --exclude='node_modules' \
+  --exclude='data' \
   --exclude='vm/disks' \
   --exclude='vm/cloud-init-build' \
   --exclude='vm/repo.tar.gz' \
