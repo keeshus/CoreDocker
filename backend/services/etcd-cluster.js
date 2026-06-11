@@ -451,15 +451,23 @@ export const addEtcdMember = async (etcd, nodeName, nodeIp) => {
   const peerURL = `http://${nodeIp}:2380`;
   console.log(`[ETCD] Adding member ${nodeName} with peer URL ${peerURL}`);
 
-  // Use etcd3 gRPC client directly — much faster than docker exec etcdctl
-  try {
-    const resp = await etcd.cluster.memberAdd({ peerURLs: [peerURL] });
-    console.log(`[ETCD] Member added: ${nodeName} (ID: ${resp.member?.ID})`);
-  } catch (e) {
-    if (e.message?.includes("already exists") || e.message?.includes("member ID")) {
-      console.log(`[ETCD] Member ${nodeName} already exists, continuing.`);
-    } else {
-      throw new Error(`Failed to add etcd member: ${e.message}`);
+  // Use etcd3 gRPC client — retry if circuit breaker is open from previous ops
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = await etcd.cluster.memberAdd({ peerURLs: [peerURL] });
+      console.log(`[ETCD] Member added: ${nodeName} (ID: ${resp.member?.ID})`);
+      break;
+    } catch (e) {
+      if (e.message?.includes("already exists") || e.message?.includes("member ID")) {
+        console.log(`[ETCD] Member ${nodeName} already exists, continuing.`);
+        break;
+      }
+      if (attempt < 2) {
+        console.log(`[ETCD] Member add attempt ${attempt + 1} failed: ${e.message}. Retrying in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        throw new Error(`Failed to add etcd member after retries: ${e.message}`);
+      }
     }
   }
 
