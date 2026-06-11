@@ -1,0 +1,15 @@
+import { execSync } from 'child_process';
+
+export async function teardown() {
+  console.log('\n[E2E Teardown] Destroying cluster...');
+  try {
+    execSync('sudo bash vm/destroy-cluster.sh', {
+      stdio: 'inherit',
+      cwd: process.cwd(),
+      timeout: 60000,
+    });
+    console.log('[E2E Teardown] Cluster destroyed.\n');
+  } catch (e) {
+    console.error('[E2E Teardown] Cleanup failed:', e.message);
+  }
+}

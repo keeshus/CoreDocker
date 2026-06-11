@@ -9,6 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.js",
     "backend:start": "npm run start -w backend",
     "backend:dev": "npm run dev -w backend",
     "frontend:dev": "npm run dev -w frontend",
