@@ -51,7 +51,7 @@ describe('Cluster setup', () => {
 
   it('joins node-2 to the cluster via backhaul', async () => {
     const result = await setupNode('node2', {
-      mode: 'join', password: PASSWORD,
+      mode: 'join', joinToken: PASSWORD,
       primaryIp: NODES.node1.backhaulIp,
     });
     expect(result.success).toBe(true);
