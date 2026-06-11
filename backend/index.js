@@ -497,7 +497,7 @@ app.post('/api/system/join', async (req, res) => {
     }
 
     console.log(`[Join] Adding etcd member: ${name} at ${ip}:2380`);
-    const clusterInfo = await addEtcdMember(name, ip);
+    const clusterInfo = await addEtcdMember(etcd, name, ip);
     console.log(`[Join] etcd member added: ${name} ready to join`);
 
     const id = uuidv4();

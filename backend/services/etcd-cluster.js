@@ -1,5 +1,4 @@
 import docker from './docker.js';
-import { etcd } from './db.js';
 import { SYSTEM_NAMESPACE, resolveHostPath } from './ephemeral-tasks.js';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -448,7 +447,7 @@ export const bootstrapEtcd = async () => {
  *   allClientUrls: string[] (for ETCD_HOSTS)
  * }
  */
-export const addEtcdMember = async (nodeName, nodeIp) => {
+export const addEtcdMember = async (etcd, nodeName, nodeIp) => {
   const peerURL = `http://${nodeIp}:2380`;
   console.log(`[ETCD] Adding member ${nodeName} with peer URL ${peerURL}`);
 

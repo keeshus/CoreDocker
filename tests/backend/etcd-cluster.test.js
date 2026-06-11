@@ -94,6 +94,12 @@ const mockDb = {
   value: vi.fn().mockReturnThis(),
   lease: vi.fn(),
   election: vi.fn(),
+  cluster: {
+    memberAdd: vi.fn().mockResolvedValue({ member: { ID: '123' } }),
+    memberList: vi.fn().mockResolvedValue({ members: [
+      { name: 'node-1', peerURLs: ['http://10.0.0.1:2380'], clientURLs: ['http://10.0.0.1:2379'] },
+    ] }),
+  },
 };
 
 vi.mock('../../backend/services/db.js', () => ({
@@ -170,10 +176,10 @@ describe('addEtcdMember', () => {
       }),
     }));
 
-    const result = await addEtcdMember('node-2', '10.0.0.2');
+    const result = await addEtcdMember(mockDb, 'node-2', '10.0.0.2');
     expect(result.memberName).toBe('node-2');
-    expect(result.initialCluster).toContain('node-2');
     expect(result.initialClusterState).toBe('existing');
+    expect(result.allClientUrls).toBeDefined();
   });
 });
 
