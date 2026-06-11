@@ -359,6 +359,8 @@ destroy_cluster() {
     fi
   done
   rm -rf "$SCRIPT_DIR/disks" "$SCRIPT_DIR/cloud-init-build" "$SCRIPT_DIR/repo.tar.gz" "$SCRIPT_DIR/serve.py"
+  # Wipe persisted etcd/cluster data so VMs start truly fresh
+  rm -rf "$PROJECT_DIR/data/backup/__system__" "$PROJECT_DIR/data/nonbackup/__system__"
   # Clear known_hosts so SSH doesn't complain about changed host keys on recreate
   for ip in 192.168.100.10 192.168.100.11 192.168.100.12 10.100.0.10 10.100.0.11 10.100.0.12; do
     ssh-keygen -f '/root/.ssh/known_hosts' -R "$ip" 2>/dev/null || true

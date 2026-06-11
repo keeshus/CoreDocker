@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLUSTER_NET_NAME="coredocker-cluster"
 BACKHAUL_NET_NAME="coredocker-backhaul"
 
@@ -32,6 +33,7 @@ done
 
 # Clean up disks (optional)
 rm -rf "$SCRIPT_DIR/disks" "$SCRIPT_DIR/cloud-init-build" "$SCRIPT_DIR/repo.tar.gz" "$SCRIPT_DIR/serve.py"
+rm -rf "$PROJECT_DIR/data/backup/__system__" "$PROJECT_DIR/data/nonbackup/__system__"
 
 # Clear known_hosts so SSH doesn't complain about changed host keys on recreate
 for ip in 192.168.100.10 192.168.100.11 192.168.100.12 10.100.0.10 10.100.0.11 10.100.0.12; do
