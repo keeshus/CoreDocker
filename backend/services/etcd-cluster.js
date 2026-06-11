@@ -1,4 +1,5 @@
 import docker from './docker.js';
+import { etcd } from './db.js';
 import { SYSTEM_NAMESPACE, resolveHostPath } from './ephemeral-tasks.js';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -448,106 +449,34 @@ export const bootstrapEtcd = async () => {
  * }
  */
 export const addEtcdMember = async (nodeName, nodeIp) => {
-  const authArgs = getAuthArgs();
-  const container = docker.getContainer(CONTAINER_NAME);
+  const peerURL = `http://${nodeIp}:2380`;
+  console.log(`[ETCD] Adding member ${nodeName} with peer URL ${peerURL}`);
 
-  console.log(`[ETCD] Adding member ${nodeName} with peer URL http://${nodeIp}:2380`);
-
-  // Run etcdctl member add with timeout + retry with backoff.
-  // Uses --endpoints=127.0.0.1:2379 explicitly to avoid ambiguity.
-  // Retries are essential: a previous partially-completed join attempt may
-  // have left etcd briefly unresponsive, and the retry gives it time to recover.
-  const memberAddCmd = [
-    'etcdctl',
-    '--endpoints=127.0.0.1:2379',
-    '--command-timeout=60s',
-    ...authArgs,
-    'member', 'add', nodeName,
-    '--peer-urls', `http://${nodeIp}:2380`,
-  ];
-
-  const EXISTS_SENTINEL = '__MEMBER_EXISTS__';
-  let memberAddOutput = null;
-  let lastError = null;
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) {
-      const delay = attempt * 2000;
-      console.log(`[ETCD] Retrying member add (attempt ${attempt + 1}/3, waiting ${delay}ms)...`);
-      await new Promise(r => setTimeout(r, delay));
-    }
-
-    try {
-      const { success, output } = await execWithOutput(container, memberAddCmd, 90000);
-      if (success) {
-        memberAddOutput = output;
-        console.log(`[ETCD] Member add succeeded on attempt ${attempt + 1}:`, output);
-        break;
-      }
-
-      // Check if member already exists (from a previous partially-completed join)
-      if (output.includes('already exists') || output.includes('etcdserver: member ID')) {
-        console.log(`[ETCD] Member ${nodeName} already exists, treating as success.`);
-        memberAddOutput = EXISTS_SENTINEL;
-        break;
-      }
-
-      // Strip gRPC binary framing from error output for readability
-      const cleanOutput = output.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
-      lastError = new Error(`etcdctl member add failed: ${cleanOutput}`);
-      console.warn(`[ETCD] Member add attempt ${attempt + 1} returned non-zero: ${cleanOutput}`);
-    } catch (e) {
-      lastError = e;
-      console.warn(`[ETCD] Member add attempt ${attempt + 1} error: ${e.message}`);
+  // Use etcd3 gRPC client directly — much faster than docker exec etcdctl
+  try {
+    const resp = await etcd.cluster.memberAdd({ peerURLs: [peerURL] });
+    console.log(`[ETCD] Member added: ${nodeName} (ID: ${resp.member?.ID})`);
+  } catch (e) {
+    if (e.message?.includes("already exists") || e.message?.includes("member ID")) {
+      console.log(`[ETCD] Member ${nodeName} already exists, continuing.`);
+    } else {
+      throw new Error(`Failed to add etcd member: ${e.message}`);
     }
   }
 
-  // If all attempts failed and we don't have an "already exists" result, throw
-  if (memberAddOutput === null && lastError) {
-    throw lastError;
-  }
-
-  // Parse member add output (may be sentinel if member was pre-existing)
-  const parsed = (memberAddOutput && memberAddOutput !== EXISTS_SENTINEL)
-    ? parseEtcdctlAddOutput(memberAddOutput)
-    : {};
-
-  // Get the full member list to build client URLs (with retry)
-  const memberListCmd = [
-    'etcdctl',
-    '--endpoints=127.0.0.1:2379',
-    ...authArgs,
-    'member', 'list', '--write-out=json',
-  ];
-
+  // Get member list via gRPC to build client URLs
   let allClientUrls = [];
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const { success, output } = await execWithOutput(container, memberListCmd, 15000);
-      if (success && output) {
-        try {
-          const memberList = JSON.parse(output);
-          if (memberList.members) {
-            allClientUrls = memberList.members.map(m => {
-              const url = m.clientURLs && m.clientURLs[0];
-              return url || null;
-            }).filter(Boolean);
-          }
-          console.log(`[ETCD] Member list: ${allClientUrls.join(', ')}`);
-          break;
-        } catch (e) {
-          console.warn(`[ETCD] Failed to parse member list JSON: ${e.message}`);
-        }
-      }
-    } catch (e) {
-      console.warn(`[ETCD] Member list attempt ${attempt + 1} error: ${e.message}`);
-      if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
-    }
+  try {
+    const listResp = await etcd.cluster.memberList();
+    const members = listResp.members || [];
+    allClientUrls = members.map(m => (m.clientURLs && m.clientURLs[0]) || null).filter(Boolean);
+    console.log(`[ETCD] Member list: ${allClientUrls.join(", ")}`);
+  } catch (e) {
+    console.warn(`[ETCD] Member list error: ${e.message}`);
   }
 
   if (allClientUrls.length === 0) {
-    console.warn('[ETCD] Could not retrieve member list — cluster join may be incomplete.');
+    console.warn("[ETCD] Could not retrieve member list — cluster join may be incomplete.");
   }
 
   const clusterConfig = readClusterConfig();
@@ -557,16 +486,16 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
   try {
     const authFile = path.join(BACKUP_MOUNT, `${SYSTEM_NAMESPACE}/etcd/auth.json`);
     if (fs.existsSync(authFile)) {
-      authCreds = JSON.parse(fs.readFileSync(authFile, 'utf8'));
+      authCreds = JSON.parse(fs.readFileSync(authFile, "utf8"));
     }
   } catch (e) {
     console.warn(`[ETCD] Failed to read auth credentials: ${e.message}`);
   }
 
   return {
-    memberName: parsed.name || nodeName,
-    initialCluster: parsed.initialCluster,
-    initialClusterState: parsed.initialClusterState || 'existing',
+    memberName: nodeName,
+    initialCluster: null,
+    initialClusterState: "existing",
     allClientUrls,
     clusterToken: clusterConfig ? clusterConfig.clusterToken : undefined,
     authUsername: authCreds?.username,
@@ -574,9 +503,6 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
     keepalivedPassword: clusterConfig ? clusterConfig.keepalivedPassword : undefined,
   };
 };
-
-/**
- * Migrate from standalone etcd to clustered etcd.
  *
  * 1. Stops and removes the existing standalone etcd container
  * 2. Wipes the local etcd data directory
