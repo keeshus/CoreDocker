@@ -460,6 +460,7 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
   const memberAddCmd = [
     'etcdctl',
     '--endpoints=127.0.0.1:2379',
+    '--command-timeout=60s',
     ...authArgs,
     'member', 'add', nodeName,
     '--peer-urls', `http://${nodeIp}:2380`,
@@ -477,7 +478,7 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
     }
 
     try {
-      const { success, output } = await execWithOutput(container, memberAddCmd, 30000);
+      const { success, output } = await execWithOutput(container, memberAddCmd, 90000);
       if (success) {
         memberAddOutput = output;
         console.log(`[ETCD] Member add succeeded on attempt ${attempt + 1}:`, output);
