@@ -363,6 +363,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       await bootCluster(nodeId);
       logEvent('security', 'info', 'System initialized (create)', { nodeId, nodeName });
     } else if (mode === 'join') {
+      const startTime = Date.now();
       console.log(`[Cluster] Joining cluster via primary ${primaryIp} as ${nodeName} (ip=${nodeIp}, clientIp=${clientIp})`);
       const joinUrl = `${getNodeUrl(primaryIp)}/api/system/join`;
       console.log(`[Cluster] Sending join request to ${joinUrl}`);
@@ -375,12 +376,14 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
         },
         body: JSON.stringify({ name: nodeName, ip: nodeIp, clientIp }),
       });
+      const elapsed = Date.now() - startTime;
       if (!joinRes.ok) {
         const resBody = await joinRes.text();
-        console.error(`[Cluster] Join request failed (status ${joinRes.status}): ${resBody}`);
+        console.error(`[Cluster] Join request failed after ${elapsed}ms (status ${joinRes.status}): ${resBody}`);
         throw new Error('Failed to join cluster: ' + resBody);
       }
 
+      console.log(`[Cluster] Join response received in ${elapsed}ms`);
       const joinData = await joinRes.json();
       console.log(`[Cluster] Join response: memberName=${joinData.clusterConfig?.memberName}, initialCluster=${joinData.clusterConfig?.initialCluster}, clientUrls=[${(joinData.clusterConfig?.memberClientUrls || []).join(', ')}]`);
 
@@ -391,7 +394,9 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
 
       // Migrate local etcd from standalone to clustered
       console.log('[Cluster] Migrating etcd to cluster mode...');
+      const migrateStart = Date.now();
       await migrateToCluster(joinData.clusterConfig);
+      console.log(`[Cluster] Migration complete in ${Date.now() - migrateStart}ms`);
 
       // Update ETCD hosts to point to all cluster members
       if (joinData.clusterConfig.memberClientUrls && joinData.clusterConfig.memberClientUrls.length > 0) {
@@ -472,21 +477,28 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
 
 app.post('/api/system/join', async (req, res) => {
   try {
+    const clientIp = req.ip;
+    const { name, ip, clientIp: joinClientIp } = req.body;
+    console.log(`[Join] Request from ${clientIp}: node=${name}, ip=${ip}, clientIp=${joinClientIp}`);
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.warn(`[Join] Missing/invalid auth header from ${clientIp}`);
       return res.status(401).json({ error: 'Missing or invalid join token', code: 'AUTH_REQUIRED' });
     }
 
     const joinToken = authHeader.split(' ')[1];
     try {
       await verifyMasterPassword(joinToken);
+      console.log(`[Join] Password verified for ${name}`);
     } catch (e) {
+      console.warn(`[Join] Invalid master password from ${clientIp}: ${e.message}`);
       return res.status(403).json({ error: 'Invalid master password', code: 'JOIN_FORBIDDEN' });
     }
 
-    const { name, ip, clientIp: joinClientIp } = req.body;
-
+    console.log(`[Join] Adding etcd member: ${name} at ${ip}:2380`);
     const clusterInfo = await addEtcdMember(name, ip);
+    console.log(`[Join] etcd member added: ${name} ready to join`);
 
     const id = uuidv4();
     await saveNode(id, name, ip, 'online', joinClientIp);
@@ -506,6 +518,7 @@ app.post('/api/system/join', async (req, res) => {
       console.warn('[Join] Could not read keepalived password:', e.message);
     }
 
+    console.log(`[Join] Returning cluster config to ${name}: ${clusterInfo.initialCluster}`);
     res.json({
       success: true,
       id,
