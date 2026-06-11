@@ -16,7 +16,7 @@ export function setAuthToken(nodeKey, token) {
 }
 
 // ── HTTP helpers ───────────────────────────────────────────────────────────
-const agent = new https.Agent({ rejectUnauthorized: false });
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // self-signed certs on VMs
 
 /**
  * Call a CoreDocker API on a specific node.
@@ -35,28 +35,33 @@ export async function api(nodeKey, path, options = {}) {
     headers['Cookie'] = `token=${authTokens[nodeKey]}`;
   }
 
-  const res = await fetch(url, {
-    ...options,
-    headers,
-    agent,
-    redirect: 'manual',
+  // Node's global fetch() doesn't support https.Agent — use node:https directly
+  const { method = 'GET', body } = options;
+  const result = await new Promise((resolve, reject) => {
+    const req = https.request(url, { method, headers, rejectUnauthorized: false }, (res) => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => {
+        let data;
+        try { data = JSON.parse(raw); } catch { data = raw; }
+
+        // Capture token from set-cookie
+        const setCookie = res.headers['set-cookie'];
+        if (setCookie) {
+          const match = (Array.isArray(setCookie) ? setCookie[0] : setCookie).match(/token=([^;]+)/);
+          if (match) setAuthToken(nodeKey, match[1]);
+        }
+
+        resolve({ status: res.statusCode, data });
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    req.end();
   });
 
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    data = await res.text();
-  }
-
-  // Capture token from set-cookie
-  const setCookie = res.headers.get('set-cookie');
-  if (setCookie) {
-    const match = setCookie.match(/token=([^;]+)/);
-    if (match) setAuthToken(nodeKey, match[1]);
-  }
-
-  return { status: res.status, data };
+  return result;
 }
 
 // ── Higher-level helpers ───────────────────────────────────────────────────
@@ -125,14 +130,9 @@ export async function unsealNode(nodeKey, password) {
  * Setup a node (create cluster, join, or restore).
  */
 export async function setupNode(nodeKey, payload) {
-  const formData = new FormData();
-  for (const [k, v] of Object.entries(payload)) {
-    formData.append(k, v);
-  }
   const { status, data } = await api(nodeKey, '/api/system/setup', {
     method: 'POST',
-    body: formData,
-    headers: {}, // let fetch set multipart boundary
+    body: JSON.stringify(payload),
   });
   if (status !== 200) throw new Error(`Setup failed on ${nodeKey}: ${JSON.stringify(data)}`);
   return data;
