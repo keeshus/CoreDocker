@@ -502,6 +502,8 @@ export const addEtcdMember = async (etcd, nodeName, nodeIp) => {
     keepalivedPassword: clusterConfig ? clusterConfig.keepalivedPassword : undefined,
   };
 };
+/**
+ * Migrate from standalone etcd to clustered etcd.
  *
  * 1. Stops and removes the existing standalone etcd container
  * 2. Wipes the local etcd data directory
