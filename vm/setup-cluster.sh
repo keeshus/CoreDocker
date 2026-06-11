@@ -460,7 +460,7 @@ main() {
 
   # Show cluster state
   local status_json
-  status_json="$(curl -sf http://192.168.100.10/api/system/status 2>/dev/null || echo '{"error":"not ready"}')"
+  status_json="$(curl -sfk https://192.168.100.10/api/system/status 2>/dev/null || echo '{"error":"not ready"}')"
   echo "  Node status:"
   echo "  $status_json" | python3 -m json.tool 2>/dev/null || echo "  $status_json"
   echo ""

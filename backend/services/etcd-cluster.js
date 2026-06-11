@@ -430,17 +430,6 @@ export const bootstrapEtcd = async () => {
       }
     }
 
-    // Save cluster config for standalone bootstrap so subsequent restarts
-    // and joining nodes can read the generated cluster token.
-    if (!clusterConfig) {
-      const selfIp = advertiseIp || '127.0.0.1';
-      writeClusterConfig({
-        clusterToken,
-        members: [{ name: etcdName, ip: selfIp }],
-        keepalivedPassword: keepalivedPass,
-      });
-    }
-
     return true;
   } catch (err) {
     console.error('[ETCD] Failed to create container:', err.message);
