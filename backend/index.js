@@ -215,10 +215,10 @@ const bootCluster = async (nodeId) => {
   console.log('[Cluster] Booting services...');
   try {
     startLogger();
-    // Reconciler runs every 120s — no need for initial sync on boot
     startScheduler();
-    startOrchestrator(nodeId);
     startReconciler(nodeId);
+    // Delay orchestrator to let etcd stabilize — its election campaign is heavy
+    setTimeout(() => startOrchestrator(nodeId), 15000);
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
     // Migrations run async so setup returns immediately
