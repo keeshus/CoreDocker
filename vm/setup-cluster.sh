@@ -22,13 +22,13 @@ BACKHAUL_SUBNET="10.100.0.0/24"
 BACKHAUL_GATEWAY="10.100.0.1"
 DOMAIN="coredocker.local"
 
-VM_MEMORY_MB=3072
-VM_CPUS=2
+VM_MEMORY_MB=6144
+VM_CPUS=3
 VM_DISK_GB=10
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLOUD_IMAGE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+CLOUD_IMAGE_URL="https://cloud-images.ubuntu.com/noble/current/noble-minimal-cloudimg-amd64.img"
 CLOUD_IMAGE_FILE="$SCRIPT_DIR/noble-server-cloudimg-amd64.img"
 SSH_KEY_DIR="$SCRIPT_DIR/ssh-keys"
 SSH_KEY_PRIV="$SSH_KEY_DIR/cluster.key"
