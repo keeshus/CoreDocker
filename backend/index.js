@@ -215,15 +215,13 @@ const bootCluster = async (nodeId) => {
   console.log('[Cluster] Booting services...');
   try {
     startLogger();
-    // Fire-and-forget: don't block setup on full reconciliation.
-    // Services start in the background so the join/unseal response returns immediately.
-    reconcileContainers(nodeId).catch(e => console.error('[Cluster] Initial reconcile failed:', e.message));
+    // Reconciler runs every 120s — no need for initial sync on boot
     startScheduler();
     startOrchestrator(nodeId);
     startReconciler(nodeId);
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
-    // Run migrations in background — non-blocking
+    // Migrations run async so setup returns immediately
     runMigrations(migrations).catch(e => console.error('[Cluster] Migrations failed:', e.message));
   } catch (e) {
     console.error(`[Cluster] Boot failed: ${e.message}`);
