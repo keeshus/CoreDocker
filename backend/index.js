@@ -216,6 +216,8 @@ const bootCluster = async (nodeId) => {
   try {
     startLogger();
     await reconcileContainers(nodeId);
+    // Brief pause to let etcd server stabilize before services start polling
+    await new Promise(r => setTimeout(r, 5000));
     startScheduler();
     startOrchestrator(nodeId);
     startReconciler(nodeId);
