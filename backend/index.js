@@ -215,15 +215,16 @@ const bootCluster = async (nodeId) => {
   console.log('[Cluster] Booting services...');
   try {
     startLogger();
-    await reconcileContainers(nodeId);
-    // Brief pause to let etcd server stabilize before services start polling
-    await new Promise(r => setTimeout(r, 5000));
+    // Fire-and-forget: don't block setup on full reconciliation.
+    // Services start in the background so the join/unseal response returns immediately.
+    reconcileContainers(nodeId).catch(e => console.error('[Cluster] Initial reconcile failed:', e.message));
     startScheduler();
     startOrchestrator(nodeId);
     startReconciler(nodeId);
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
-    await runMigrations(migrations);
+    // Run migrations in background — non-blocking
+    runMigrations(migrations).catch(e => console.error('[Cluster] Migrations failed:', e.message));
   } catch (e) {
     console.error(`[Cluster] Boot failed: ${e.message}`);
   }
