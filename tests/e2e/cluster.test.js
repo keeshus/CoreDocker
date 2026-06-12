@@ -50,8 +50,6 @@ describe('Cluster setup', () => {
   });
 
   it('joins node-2 to the cluster via backhaul', async () => {
-    // Wait for etcd to stabilize after orchestrator/reconciler/scheduler startup
-    await new Promise(r => setTimeout(r, 10000));
     const result = await setupNode('node2', {
       mode: 'join', joinToken: PASSWORD,
       primaryIp: NODES.node1.backhaulIp,
