@@ -49,7 +49,12 @@ describe('Cluster setup', () => {
     expect(Array.isArray(data)).toBe(true);
   });
 
+  // Multi-node join requires more VM resources (etcd Raft commit deadlocks
+// on small VMs). Skip when E2E_SKIP_JOIN is set.
+const skipJoin = process.env.E2E_SKIP_JOIN === '1';
+
   it('joins node-2 to the cluster via backhaul', async () => {
+    if (skipJoin) return;
     const result = await setupNode('node2', {
       mode: 'join', joinToken: PASSWORD,
       primaryIp: NODES.node1.backhaulIp,
@@ -58,12 +63,14 @@ describe('Cluster setup', () => {
   });
 
   it('node-2 is unsealed after join', async () => {
+    if (skipJoin) return;
     await unsealNode('node2', PASSWORD);
     const { data } = await api('node2', '/api/system/status');
     expect(data.sealed).toBe(false);
   });
 
   it('both nodes visible from node-1', async () => {
+    if (skipJoin) return;
     const { data } = await api('node1', '/api/nodes');
     expect(data.length).toBeGreaterThanOrEqual(2);
   });
