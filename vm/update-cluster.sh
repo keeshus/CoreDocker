@@ -76,10 +76,10 @@ tar czf "$TARBALL" \
 log "Tarball created: $(du -h "$TARBALL" | cut -f1)"
 
 # ── Step 2: Update each target node ────────────────────────
-for node_name in "${TARGET_NODES[@]}"; do
-  # Find IPs for this node
-  node_ip=""
-  backhaul_ip=""
+update_node() {
+  local node_name="$1"
+  local node_ip=""
+  local backhaul_ip=""
   for node_def in "${NODES[@]}"; do
     IFS='|' read -r name ip bh_ip <<< "$node_def"
     if [ "$name" = "$node_name" ]; then
@@ -90,22 +90,19 @@ for node_name in "${TARGET_NODES[@]}"; do
   done
   if [ -z "$node_ip" ]; then
     warn "Unknown node: $node_name, skipping."
-    continue
+    return
   fi
 
   log "Updating $node_name ($node_ip)..."
 
-  # Check if VM is reachable
   if ! ssh $SSH_OPTS "$SSH_USER@$node_ip" "exit" 2>/dev/null; then
     warn "$node_name is not reachable, skipping."
-    continue
+    return
   fi
 
-  # Copy tarball to VM
   log "  Copying code..."
   scp $SSH_OPTS "$TARBALL" "$SSH_USER@$node_ip:/tmp/coredocker-update.tar.gz" >/dev/null
 
-  # Extract and optionally rebuild
   if [ "$NO_REBUILD" = true ]; then
     log "  Extracting code (no rebuild)..."
     ssh $SSH_OPTS "$SSH_USER@$node_ip" \
@@ -114,7 +111,6 @@ for node_name in "${TARGET_NODES[@]}"; do
        sudo sed -i 's|^HOST_BACKUP_PATH=.*|HOST_BACKUP_PATH=${REPO_DIR}/data/backup|; s|^HOST_NONBACKUP_PATH=.*|HOST_NONBACKUP_PATH=${REPO_DIR}/data/nonbackup|; s|^HOST_CERTS_PATH=.*|HOST_CERTS_PATH=${REPO_DIR}/nginx/ssl|; s|^NODE_IP=.*|NODE_IP=${backhaul_ip}|; s|^NODE_CLIENT_IP=.*|NODE_CLIENT_IP=${node_ip}|' ${REPO_DIR}/.env && \
        echo '  Done.'"
   else
-    log "  Extracting code and rebuilding containers..."
     ssh $SSH_OPTS "$SSH_USER@$node_ip" \
       "sudo tar xzf /tmp/coredocker-update.tar.gz -C $REPO_DIR && \
        sudo rm /tmp/coredocker-update.tar.gz && \
@@ -125,7 +121,12 @@ for node_name in "${TARGET_NODES[@]}"; do
   fi
 
   log "$node_name updated."
+}
+
+for node_name in "${TARGET_NODES[@]}"; do
+  update_node "$node_name" &
 done
+wait
 
 # ── Cleanup ────────────────────────────────────────────────
 rm -f "$TARBALL"
