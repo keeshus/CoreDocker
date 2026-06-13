@@ -498,7 +498,25 @@ app.post('/api/system/join', async (req, res) => {
     }
 
     console.log(`[Join] Adding etcd member: ${name} at ${ip}:2380`);
-    const clusterInfo = await addEtcdMember(name, ip);
+
+    // Use etcd3 gRPC client directly — same healthy connection migrations just used
+    let allClientUrls = [];
+    try {
+      const memberResp = await etcd.cluster.memberAdd({ peerURLs: [`http://${ip}:2380`] });
+      console.log(`[Join] Member added: ${name} (ID: ${memberResp.member?.ID})`);
+
+      const listResp = await etcd.cluster.memberList();
+      const members = listResp.members || [];
+      allClientUrls = members.map(m => (m.clientURLs && m.clientURLs[0]) || null).filter(Boolean);
+    } catch (e) {
+      if (e.message?.includes('already exists') || e.message?.includes('member ID')) {
+        console.log(`[Join] Member ${name} already exists, continuing.`);
+      } else {
+        console.error(`[Join] etcd member add failed: ${e.message}`);
+        return res.status(500).json({ error: `Failed to add etcd member: ${e.message}`, code: 'JOIN_FAILED' });
+      }
+    }
+
     console.log(`[Join] etcd member added: ${name} ready to join`);
 
     const id = uuidv4();
@@ -506,7 +524,6 @@ app.post('/api/system/join', async (req, res) => {
 
     // Ensure the joining node's client URL is in the list
     const selfClientUrl = `http://${ip}:2379`;
-    const allUrls = clusterInfo.allClientUrls || [];
     if (!allUrls.find(u => u.includes(ip))) {
       allUrls.push(selfClientUrl);
     }
@@ -519,18 +536,45 @@ app.post('/api/system/join', async (req, res) => {
       console.warn('[Join] Could not read keepalived password:', e.message);
     }
 
-    console.log(`[Join] Returning cluster config to ${name}: ${clusterInfo.initialCluster}`);
+    // Build initial cluster string from member list
+    const members = allUrls.length > 0 ? allUrls : [];
+    const initialCluster = members.map(u => {
+      const host = new URL(u).hostname;
+      return `${host}=http://${host}:2380`;
+    }).join(',') || `${name}=http://${ip}:2380`;
+
+    // Read cluster token and auth creds
+    let clusterToken, authUsername, authPassword;
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      const configFile = path.join('/mnt/backup', '__system__/etcd/cluster-config.json');
+      if (fs.existsSync(configFile)) {
+        const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+        clusterToken = config.clusterToken;
+      }
+      const authFile = path.join('/mnt/backup', '__system__/etcd/auth.json');
+      if (fs.existsSync(authFile)) {
+        const auth = JSON.parse(fs.readFileSync(authFile, 'utf8'));
+        authUsername = auth.username;
+        authPassword = auth.password;
+      }
+    } catch (e) {
+      console.warn('[Join] Could not read config/auth:', e.message);
+    }
+
+    console.log(`[Join] Returning cluster config to ${name}`);
     res.json({
       success: true,
       id,
       clusterConfig: {
-        memberName: clusterInfo.memberName,
-        initialCluster: clusterInfo.initialCluster,
-        initialClusterState: clusterInfo.initialClusterState,
+        memberName: name,
+        initialCluster,
+        initialClusterState: 'existing',
         memberClientUrls: allUrls,
-        clusterToken: clusterInfo.clusterToken,
-        authUsername: clusterInfo.authUsername,
-        authPassword: clusterInfo.authPassword,
+        clusterToken,
+        authUsername,
+        authPassword,
         keepalivedPassword,
       },
     });
