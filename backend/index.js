@@ -502,7 +502,7 @@ app.post('/api/system/join', async (req, res) => {
     // Use etcd3 gRPC client directly — same healthy connection migrations just used
     let allClientUrls = [];
     try {
-      const memberResp = await etcd.cluster.memberAdd({ peerURLs: [`http://${ip}:2380`] });
+      const memberResp = await etcd.cluster.memberAdd({ peerURLs: [`http://${ip}:2380`] }, {});
       console.log(`[Join] Member added: ${name} (ID: ${memberResp.member?.ID})`);
 
       const listResp = await etcd.cluster.memberList();
