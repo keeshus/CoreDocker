@@ -218,7 +218,7 @@ const bootCluster = async (nodeId) => {
     startScheduler();
     startReconciler(nodeId);
     // Delay orchestrator to let etcd stabilize — its election campaign is heavy
-    setTimeout(() => startOrchestrator(nodeId), 15000);
+    setTimeout(() => startOrchestrator(nodeId), 60000);
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
     await runMigrations(migrations);
