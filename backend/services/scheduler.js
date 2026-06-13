@@ -577,9 +577,11 @@ export const startScheduler = () => {
     })();
   }, 30 * 1000); // Check every 30 seconds
 
-  // Fire immediately on boot so tasks with enabled:true run right away,
-  // not 30 seconds from now
-  for (const task of DEFAULT_TASKS) {
-    runTask(task.id).catch(err => console.error('[Scheduler] Boot task error:', err.message));
-  }
+  // Delay initial task run to let etcd stabilize after setup/join.
+  // Firing all tasks immediately on boot overwhelms the etcd server.
+  setTimeout(() => {
+    for (const task of DEFAULT_TASKS) {
+      runTask(task.id).catch(err => console.error('[Scheduler] Boot task error:', err.message));
+    }
+  }, 30000);
 };
