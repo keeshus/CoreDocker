@@ -221,8 +221,8 @@ const bootCluster = async (nodeId) => {
     setTimeout(() => startOrchestrator(nodeId), 15000);
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
-    // Migrations run async so setup returns immediately
-    runMigrations(migrations).catch(e => console.error('[Cluster] Migrations failed:', e.message));
+    await runMigrations(migrations);
+    console.log('[Cluster] Migrations complete.');
   } catch (e) {
     console.error(`[Cluster] Boot failed: ${e.message}`);
   }
