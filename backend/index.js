@@ -215,6 +215,8 @@ const bootCluster = async (nodeId) => {
   console.log('[Cluster] Booting services...');
   try {
     startLogger();
+    // Reset etcd circuit breaker before starting services that might trigger it
+    try { reconnectEtcd(); } catch (e) { console.warn('[Cluster] etcd reconnect:', e.message); }
     startScheduler();
     startReconciler(nodeId);
     // Delay orchestrator to let etcd stabilize — its election campaign is heavy
@@ -222,11 +224,7 @@ const bootCluster = async (nodeId) => {
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
     await runMigrations(migrations);
-    // Reconnect etcd to reset the circuit breaker — it may have opened during
-    // scheduler/reconciler startup. A fresh connection avoids 10s delays
-    // on subsequent etcd calls like saveNode in the join handler.
-    try { reconnectEtcd(); } catch (e) { console.warn('[Cluster] etcd reconnect failed:', e.message); }
-    console.log('[Cluster] Migrations complete, etcd reconnected.');
+    console.log('[Cluster] Migrations complete.');
   } catch (e) {
     console.error(`[Cluster] Boot failed: ${e.message}`);
   }
