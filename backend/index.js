@@ -203,6 +203,8 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+let _servicesStarted = false;
+
 const bootCluster = async (nodeId) => {
   if (clusterBooted) {
     console.log('[Cluster] Already booted.');
@@ -215,16 +217,25 @@ const bootCluster = async (nodeId) => {
   console.log('[Cluster] Booting services...');
   try {
     startLogger();
-    // Reset etcd circuit breaker before starting services that might trigger it
-    try { reconnectEtcd(); } catch (e) { console.warn('[Cluster] etcd reconnect:', e.message); }
-    startScheduler();
-    startReconciler(nodeId);
-    // Delay orchestrator to let etcd stabilize — its election campaign is heavy
-    setTimeout(() => startOrchestrator(nodeId), 60000);
-    clusterBooted = true;
-    console.log('[Cluster] Services started successfully.');
     await runMigrations(migrations);
     console.log('[Cluster] Migrations complete.');
+    clusterBooted = true;
+    // Defer heavy service startup to let the setup/join response return first.
+    // Starting scheduler/reconciler immediately can open the etcd3 circuit
+    // breaker, causing the setup response to hang or fail.
+    if (!_servicesStarted) {
+      _servicesStarted = true;
+      setTimeout(async () => {
+        try {
+          reconnectEtcd(); // fresh connection = reset circuit breaker
+          startScheduler();
+          startReconciler(nodeId);
+          setTimeout(() => startOrchestrator(nodeId), 60000);
+        } catch (e) {
+          console.error(`[Cluster] Deferred boot failed: ${e.message}`);
+        }
+      }, 1000);
+    }
   } catch (e) {
     console.error(`[Cluster] Boot failed: ${e.message}`);
   }
