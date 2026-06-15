@@ -222,7 +222,11 @@ const bootCluster = async (nodeId) => {
     clusterBooted = true;
     console.log('[Cluster] Services started successfully.');
     await runMigrations(migrations);
-    console.log('[Cluster] Migrations complete.');
+    // Reconnect etcd to reset the circuit breaker — it may have opened during
+    // scheduler/reconciler startup. A fresh connection avoids 10s delays
+    // on subsequent etcd calls like saveNode in the join handler.
+    try { reconnectEtcd(); } catch (e) { console.warn('[Cluster] etcd reconnect failed:', e.message); }
+    console.log('[Cluster] Migrations complete, etcd reconnected.');
   } catch (e) {
     console.error(`[Cluster] Boot failed: ${e.message}`);
   }
