@@ -40,14 +40,19 @@ async function execWithTimeout(container, cmd, timeoutMs = 20000) {
  * Resolves { success: boolean, output: string }. Throws on timeout/error.
  */
 async function execWithOutput(container, cmd, timeoutMs = 30000) {
+  console.time('[execWithOutput] container.exec');
   const exec = await container.exec({ Cmd: cmd, AttachStdout: true, AttachStderr: true });
+  console.timeEnd('[execWithOutput] container.exec');
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Exec timed out after ${timeoutMs}ms: ${cmd.join(' ')}`)), timeoutMs);
+    console.time('[execWithOutput] exec.start callback');
     exec.start(async (err, stream) => {
+      console.timeEnd('[execWithOutput] exec.start callback');
       if (err) { clearTimeout(timer); reject(err); return; }
       let data = '';
       stream.on('data', chunk => data += chunk.toString());
       stream.on('end', async () => {
+        console.log('[execWithOutput] stream end');
         clearTimeout(timer);
         try {
           const insp = await exec.inspect();
@@ -452,6 +457,7 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
   const container = docker.getContainer(CONTAINER_NAME);
 
   console.log(`[ETCD] Adding member ${nodeName} with peer URL http://${nodeIp}:2380`);
+  console.log(`[ETCD] Auth args: ${JSON.stringify(authArgs)}`);
 
   // Single etcdctl call with generous timeout — runs inside the etcd container
   // via docker exec, bypassing the etcd3 client's circuit breaker
@@ -464,7 +470,10 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
     '--peer-urls', `http://${nodeIp}:2380`,
   ];
 
+  console.log(`[ETCD] Cmd: ${memberAddCmd.join(' ')}`);
+  console.time('[ETCD] execWithOutput');
   const { success, output } = await execWithOutput(container, memberAddCmd, 120000);
+  console.timeEnd('[ETCD] execWithOutput');
 
   if (!success) {
     const cleanOutput = output.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
