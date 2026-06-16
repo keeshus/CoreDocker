@@ -575,13 +575,8 @@ export const startScheduler = () => {
         console.error('[Scheduler] Interval error:', err.message);
       }
     })();
-  }, 30 * 1000); // Check every 30 seconds
+  }, 60 * 1000); // Check every 60 seconds
 
-  // Delay initial task run to let etcd stabilize after setup/join.
-  // Firing all tasks immediately on boot overwhelms the etcd server.
-  setTimeout(() => {
-    for (const task of DEFAULT_TASKS) {
-      runTask(task.id).catch(err => console.error('[Scheduler] Boot task error:', err.message));
-    }
-  }, 30000);
+  // Initial tasks are handled by the 30s interval — no need for a separate
+  // delayed fire that would double-up the first batch.
 };
