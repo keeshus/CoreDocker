@@ -217,16 +217,15 @@ const bootCluster = async (nodeId) => {
   console.log('[Cluster] Booting services...');
   try {
     startLogger();
-    await runMigrations(migrations);
-    console.log('[Cluster] Migrations complete.');
     clusterBooted = true;
-    // Defer heavy service startup to let the setup/join response return first.
-    // Starting scheduler/reconciler immediately can open the etcd3 circuit
-    // breaker, causing the setup response to hang or fail.
+    // Defer everything — migrations, services, and circuit breaker reset.
+    // The setup response must return immediately to avoid nginx 504.
     if (!_servicesStarted) {
       _servicesStarted = true;
       setTimeout(async () => {
         try {
+          await runMigrations(migrations);
+          console.log('[Cluster] Migrations complete.');
           reconnectEtcd(); // fresh connection = reset circuit breaker
           startScheduler();
           startReconciler(nodeId);
