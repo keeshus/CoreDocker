@@ -226,7 +226,7 @@ const bootCluster = async (nodeId) => {
         try {
           await runMigrations(migrations);
           console.log('[Cluster] Migrations complete.');
-          reconnectEtcd(); // fresh connection = reset circuit breaker
+          await reconnectEtcd(); // fresh connection = reset circuit breaker
           startScheduler();
           startReconciler(nodeId);
           setTimeout(() => startOrchestrator(nodeId), 60000);
@@ -427,7 +427,7 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
             username: joinData.clusterConfig.authUsername,
             password: joinData.clusterConfig.authPassword,
           }, null, 2));
-          reconnectEtcd();
+          await reconnectEtcd();
         } catch (e) {
           console.warn('[Cluster] Failed to save etcd auth credentials:', e.message);
         }
@@ -727,7 +727,7 @@ const startBackend = async () => {
     }
 
     // Reconnect etcd with auth credentials (bootstrapEtcd may have enabled auth)
-    reconnectEtcd();
+    await reconnectEtcd();
 
     console.log('[Cluster] Waiting for ETCD to become reachable...');
     await waitForEtcd();

@@ -35,10 +35,14 @@ function buildEtcdOptions(hosts) {
 
 let etcd = new Etcd3(buildEtcdOptions());
 
-export const reconnectEtcd = (hosts) => {
+export const reconnectEtcd = async (hosts) => {
   if (hosts) etcdHosts = hosts;
-  etcd.close();
+  try { await etcd.close(); } catch {}
   etcd = new Etcd3(buildEtcdOptions());
+  // Verify the new connection is ready
+  try {
+    await etcd.get('__etcd_health_check').string();
+  } catch {}
   console.log('[DB] Reconnected to ETCD with updated credentials.');
 };
 
