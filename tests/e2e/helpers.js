@@ -122,22 +122,55 @@ export async function poll(fn, { timeout = 30000, interval = 2000, label = '' } 
  * Unseal a node with the master password.
  */
 export async function unsealNode(nodeKey, password) {
-  const { status, data } = await api(nodeKey, '/api/system/unseal', {
-    method: 'POST',
-    body: JSON.stringify({ password }),
-  });
-  if (status !== 200) throw new Error(`Unseal failed on ${nodeKey}: ${JSON.stringify(data)}`);
-  return data;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { status, data } = await api(nodeKey, '/api/system/unseal', {
+        method: 'POST',
+        body: JSON.stringify({ password }),
+      });
+      if (status === 200) return data;
+      if (attempt === 0) {
+        console.log(`  Unseal failed on ${nodeKey} (attempt 1): ${JSON.stringify(data).slice(0,100)}`);
+        await new Promise(r => setTimeout(r, 5000));
+      } else {
+        throw new Error(`Unseal failed on ${nodeKey}: ${JSON.stringify(data).slice(0,200)}`);
+      }
+    } catch (e) {
+      if (attempt === 0) {
+        console.log(`  Unseal failed on ${nodeKey} (attempt 1): ${e.message}`);
+        await new Promise(r => setTimeout(r, 5000));
+      } else {
+        throw e;
+      }
+    }
+  }
 }
 
 /**
  * Setup a node (create cluster, join, or restore).
  */
 export async function setupNode(nodeKey, payload) {
-  const { status, data } = await api(nodeKey, '/api/system/setup', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-  if (status !== 200) throw new Error(`Setup failed on ${nodeKey}: ${JSON.stringify(data)}`);
-  return data;
+  // Retry setup once — fresh VMs can be slow after Docker build
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { status, data } = await api(nodeKey, '/api/system/setup', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (status === 200) return data;
+      if (attempt === 0) {
+        console.log(`  Setup failed on ${nodeKey} (attempt 1): ${JSON.stringify(data).slice(0,100)}`);
+        await new Promise(r => setTimeout(r, 10000));
+      } else {
+        throw new Error(`Setup failed on ${nodeKey}: ${JSON.stringify(data).slice(0,200)}`);
+      }
+    } catch (e) {
+      if (attempt === 0) {
+        console.log(`  Setup failed on ${nodeKey} (attempt 1): ${e.message}`);
+        await new Promise(r => setTimeout(r, 10000));
+      } else {
+        throw e;
+      }
+    }
+  }
 }

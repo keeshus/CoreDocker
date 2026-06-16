@@ -7,7 +7,7 @@ export default defineConfig({
     include: ['tests/e2e/**/*.test.js'],
     globalSetup: './tests/e2e/setup.js',
     globalTeardown: './tests/e2e/teardown.js',
-    testTimeout: 90000,  // 90s per test — VM operations can be slow
-    hookTimeout: 120000, // 120s for setup/teardown hooks
+    testTimeout: 300000,  // 300s per test — Docker operations can be slow on VMs
+    hookTimeout: 300000, // 300s for beforeAll/afterAll hooks
   },
 });
