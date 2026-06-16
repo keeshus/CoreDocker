@@ -510,14 +510,33 @@ app.post('/api/system/join', async (req, res) => {
       return res.status(403).json({ error: 'Invalid master password', code: 'JOIN_FORBIDDEN' });
     }
 
-    console.log(`[Join] Adding etcd member: ${name} at ${ip}:2380`);
+    const id = uuidv4();
 
-    // Use docker exec etcdctl — runs inside container, bypasses etcd3 client issues
+    // Read all static config BEFORE adding as etcd member — after member add,
+    // Raft requires majority (2/2) and the joining node isn't ready to vote yet.
+    let keepalivedPassword, clusterToken, authUsername, authPassword;
+    try {
+      const authDir = '/mnt/backup/__system__/etcd';
+      const configFile = path.join(authDir, 'cluster-config.json');
+      const authFile = path.join(authDir, 'auth.json');
+      keepalivedPassword = await etcd.get('__system__/keepalived/password').string();
+      if (fs.existsSync(configFile)) {
+        clusterToken = JSON.parse(fs.readFileSync(configFile, 'utf8')).clusterToken;
+      }
+      if (fs.existsSync(authFile)) {
+        const a = JSON.parse(fs.readFileSync(authFile, 'utf8'));
+        authUsername = a.username;
+        authPassword = a.password;
+      }
+    } catch (e) {
+      console.warn('[Join] Could not read config/auth:', e.message);
+    }
+
+    await saveNode(id, name, ip, 'online', joinClientIp);
+
+    console.log(`[Join] Adding etcd member: ${name} at ${ip}:2380`);
     const clusterInfo = await addEtcdMember(name, ip);
     console.log(`[Join] etcd member added: ${name} ready to join`);
-
-    const id = uuidv4();
-    await saveNode(id, name, ip, 'online', joinClientIp);
 
     const allUrls = clusterInfo.allClientUrls || [];
     const selfClientUrl = `http://${ip}:2379`;
@@ -525,15 +544,7 @@ app.post('/api/system/join', async (req, res) => {
       allUrls.push(selfClientUrl);
     }
 
-    // Read keepalived password to share with joining node
-    let keepalivedPassword;
-    try {
-      keepalivedPassword = await etcd.get('__system__/keepalived/password').string();
-    } catch (e) {
-      console.warn('[Join] Could not read keepalived password:', e.message);
-    }
-
-    console.log(`[Join] Returning cluster config to ${name}: ${clusterInfo.initialCluster}`);
+    console.log(`[Join] Returning cluster config to ${name}`);
     res.json({
       success: true,
       id,
@@ -542,9 +553,9 @@ app.post('/api/system/join', async (req, res) => {
         initialCluster: clusterInfo.initialCluster,
         initialClusterState: clusterInfo.initialClusterState || 'existing',
         memberClientUrls: allUrls,
-        clusterToken: clusterInfo.clusterToken,
-        authUsername: clusterInfo.authUsername,
-        authPassword: clusterInfo.authPassword,
+        clusterToken,
+        authUsername,
+        authPassword,
         keepalivedPassword,
       },
     });
