@@ -315,10 +315,13 @@ app.get('/api/system/status', async (req, res) => {
     } catch (err) {}
   }
 
-  let initialized;
-  let sealed;
-  initialized = await isSystemInitialized();
-  sealed = isNodeSealed();
+  let initialized = false;
+  let sealed = true;
+  try { initialized = await isSystemInitialized(); } catch {}
+  try { sealed = isNodeSealed(); } catch {}
+  if (!initialized) {
+    return res.json({ initialized: false, sealed: true, authenticated: false });
+  }
 
   res.json({
     initialized,
