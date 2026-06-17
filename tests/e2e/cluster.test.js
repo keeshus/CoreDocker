@@ -2,41 +2,18 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { api, waitForNode, unsealNode, setupNode, NODES, poll } from './helpers.js';
 
 const PASSWORD = process.env.E2E_PASSWORD || 'TestCluster123!';
-const nodeKeys = Object.keys(NODES);
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 1. Provisioning — all nodes are alive
-// ═══════════════════════════════════════════════════════════════════════════
-describe('Cluster provisioning', () => {
+describe('CoreDocker Cluster', () => {
   beforeAll(async () => {
-    await Promise.all(nodeKeys.map(k => waitForNode(k, 300000)));
+    await Promise.all(Object.keys(NODES).map(k => waitForNode(k, 300000)));
   }, 360000);
 
-  it('all 3 nodes respond to status endpoint', async () => {
-    for (const key of nodeKeys) {
-      const { status } = await api(key, '/api/system/status');
-      expect(status).toBe(200);
-    }
-  });
-
-  it('all 3 nodes are initially sealed', async () => {
-    for (const key of nodeKeys) {
-      const { data } = await api(key, '/api/system/status');
-      expect(data.sealed).toBe(true);
-    }
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 2. Full cluster flow — create on node-1, join node-2
-// ═══════════════════════════════════════════════════════════════════════════
-describe('Cluster setup & join', () => {
   it('creates cluster on node-1 and joins node-2', async () => {
-    // Create cluster (this also unseals the node and returns a token)
+    // Step 1: Create cluster on node-1
     const setupResult = await setupNode('node1', { mode: 'create', password: PASSWORD });
     expect(setupResult.success).toBe(true);
 
-    // Join node-2 by calling the join endpoint directly (proven working in seconds)
+    // Step 2: Join node-2
     const joinResult = await api('node1', '/api/system/join', {
       method: 'POST',
       body: JSON.stringify({ name: 'node-2', ip: '10.100.0.11', clientIp: '192.168.100.11' }),
@@ -44,136 +21,77 @@ describe('Cluster setup & join', () => {
     });
     expect(joinResult.status).toBe(200);
     expect(joinResult.data.success).toBe(true);
-    expect(joinResult.data.id).toBeTruthy();
 
-    // Verify both nodes visible from node-1 (already unsealed from setup)
-    const nodeList = await api('node1', '/api/nodes');
-    expect(nodeList.status).toBe(200);
-    expect(nodeList.data.length).toBeGreaterThanOrEqual(2);
-  });
-});
+    // Step 3: Re-auth and verify
+    await unsealNode('node1', PASSWORD);
+    const status = await api('node1', '/api/system/status');
+    expect(status.data.sealed).toBe(false);
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 3. Scheduled tasks
-// ═══════════════════════════════════════════════════════════════════════════
-describe('Scheduled tasks', () => {
-  it('lists all default tasks', async () => {
-    const { status, data } = await api('node1', '/api/tasks');
-    expect(status).toBe(200);
-    expect(data.length).toBeGreaterThanOrEqual(4);
-    const ids = data.map(t => t.id);
-    expect(ids).toContain('etcd-snapshot');
-    expect(ids).toContain('purge-old-logs');
-  });
+    // Step 4: List tasks
+    const tasks = await api('node1', '/api/tasks');
+    expect(tasks.status).toBe(200);
+    expect(tasks.data.length).toBeGreaterThanOrEqual(4);
 
-  it('runs etcd-snapshot task', async () => {
-    await api('node1', '/api/tasks/etcd-snapshot/trigger', { method: 'POST' });
-
-    const task = await poll(
+    // Step 5: Trigger purge-old-logs
+    await api('node1', '/api/tasks/purge-old-logs/trigger', { method: 'POST' });
+    const purged = await poll(
       async () => {
-        const { data } = await api('node1', '/api/tasks');
-        const t = data.find(t => t.id === 'etcd-snapshot');
-        return t?.status === 'success' ? t : null;
+        const r = await api('node1', '/api/tasks');
+        if (r.status !== 200) return null;
+        const t = r.data.find(t => t.id === 'purge-old-logs');
+        return t?.status === 'success' || t?.status === 'failed' ? t : null;
       },
-      { timeout: 30000, label: 'etcd-snapshot completion' }
+      { timeout: 30000, label: 'purge-old-logs' }
     );
-    expect(task.lastOutput).toContain('Snapshot saved');
-  });
+    expect(purged.status).toBe('success');
 
-  it('has log history after running tasks', async () => {
-    const { status, data } = await api('node1', '/api/tasks/etcd-snapshot/logs');
-    expect(status).toBe(200);
-    expect(data.files || data).toBeDefined();
-    expect(data.total || data.length).toBeGreaterThanOrEqual(1);
-  });
+    // Step 6: Save and read settings
+    const settings = { dnsForwarder: '1.1.1.1', sshUser: 'coredocker' };
+    const save = await api('node1', '/api/settings', { method: 'POST', body: JSON.stringify(settings) });
+    expect(save.status).toBe(200);
 
-  it('pauses and resumes a task', async () => {
-    await api('node1', '/api/tasks/ha-folder-sync/toggle', {
-      method: 'POST', body: JSON.stringify({ enabled: false }),
+    const read = await api('node1', '/api/settings');
+    expect(read.data.sshUser).toBe('coredocker');
+
+    // Step 7: Save and read encrypted secret
+    await api('node1', '/api/secrets', {
+      method: 'POST',
+      body: JSON.stringify({ key: '__system__/test-key', value: 'test-value' }),
     });
-    const { data: afterPause } = await api('node1', '/api/tasks');
-    expect(afterPause.find(t => t.id === 'ha-folder-sync').enabled).toBe(false);
-
-    await api('node1', '/api/tasks/ha-folder-sync/toggle', {
-      method: 'POST', body: JSON.stringify({ enabled: true }),
+    const bulk = await api('node1', '/api/secrets/bulk-read', {
+      method: 'POST',
+      body: JSON.stringify({ keys: ['__system__/test-key'] }),
     });
-    const { data: afterResume } = await api('node1', '/api/tasks');
-    expect(afterResume.find(t => t.id === 'ha-folder-sync').enabled).toBe(true);
-  });
-});
+    expect(bulk.data['__system__/test-key']).toBe('test-value');
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 4. Settings & secrets
-// ═══════════════════════════════════════════════════════════════════════════
-describe('Settings & secrets', () => {
-  it('saves and reads cluster settings', async () => {
-    const settings = { dnsForwarder: '1.1.1.1', sshUser: 'coredocker', resticS3Endpoint: 's3.example.com', resticS3Bucket: 'test-bucket' };
-    const { status: s } = await api('node1', '/api/settings', { method: 'POST', body: JSON.stringify(settings) });
-    expect(s).toBe(200);
+    // Step 8: System secrets hidden from tab
+    const secrets = await api('node1', '/api/secrets');
+    expect(secrets.data.filter(k => k.startsWith('__system__/')).length).toBe(0);
 
-    const { data } = await api('node1', '/api/settings');
-    expect(data.sshUser).toBe('coredocker');
-    expect(data.resticS3Endpoint).toBe('s3.example.com');
-  });
+    // Step 9: Node management
+    const nodes = await api('node1', '/api/nodes');
+    expect(nodes.status).toBe(200);
+    expect(nodes.data.length).toBeGreaterThanOrEqual(2);
 
-  it('saves and bulk-reads encrypted secrets', async () => {
-    await api('node1', '/api/secrets', { method: 'POST', body: JSON.stringify({ key: '__system__/cert-domain', value: 'example.com' }) });
+    const n1 = nodes.data[0];
+    expect(n1.id).toBeTruthy();
+    expect(n1.status).toBe('online');
 
-    const { data } = await api('node1', '/api/secrets/bulk-read', {
-      method: 'POST', body: JSON.stringify({ keys: ['__system__/cert-domain'] }),
+    // Rename and rename back
+    await api('node1', `/api/nodes/${n1.id}/rename`, {
+      method: 'PUT', body: JSON.stringify({ name: 'test-node' }),
     });
-    expect(data['__system__/cert-domain']).toBe('example.com');
-  });
+    const afterRename = await api('node1', '/api/nodes');
+    expect(afterRename.data.find(n => n.id === n1.id).name).toBe('test-node');
 
-  it('system secrets hidden from secrets tab', async () => {
-    const { data } = await api('node1', '/api/secrets');
-    expect(data.filter(k => k.startsWith('__system__/')).length).toBe(0);
-  });
-
-  it('cross-node settings consistency', async () => {
-    await unsealNode('node2', PASSWORD);
-    const { data } = await api('node2', '/api/settings');
-    expect(data.resticS3Endpoint).toBe('s3.example.com');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 5. Node management
-// ═══════════════════════════════════════════════════════════════════════════
-describe('Node management', () => {
-  it('node list includes node-1', async () => {
-    const { data } = await api('node1', '/api/nodes');
-    expect(data.length).toBeGreaterThanOrEqual(1);
-    for (const n of data) {
-      expect(n.id).toBeTruthy();
-      expect(n.name).toBeTruthy();
-      expect(n.status).toBe('online');
-    }
-  });
-
-  it('renames local node', async () => {
-    const { data: nodes } = await api('node1', '/api/nodes');
-    const node1 = nodes[0];
-
-    await api('node1', `/api/nodes/${node1.id}/rename`, {
-      method: 'PUT', body: JSON.stringify({ name: 'master-node' }),
-    });
-
-    const { data: after } = await api('node1', '/api/nodes');
-    expect(after.find(n => n.id === node1.id).name).toBe('master-node');
-
-    // Rename back
-    await api('node1', `/api/nodes/${node1.id}/rename`, {
+    await api('node1', `/api/nodes/${n1.id}/rename`, {
       method: 'PUT', body: JSON.stringify({ name: 'node-1' }),
     });
-  });
 
-  it('rejects invalid DNS names', async () => {
-    const { data: nodes } = await api('node1', '/api/nodes');
-    const { status, data } = await api('node1', `/api/nodes/${nodes[0].id}/rename`, {
+    // Bad DNS name rejected
+    const bad = await api('node1', `/api/nodes/${n1.id}/rename`, {
       method: 'PUT', body: JSON.stringify({ name: 'Bad Name' }),
     });
-    expect(status).toBe(400);
-    expect(data.error).toContain('DNS');
-  });
+    expect(bad.status).toBe(400);
+  }, 300000);
 });

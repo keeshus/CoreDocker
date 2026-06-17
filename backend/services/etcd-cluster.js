@@ -224,12 +224,15 @@ export const bootstrapEtcd = async () => {
 
     // Verify etcd is actually responsive — retry a few times to tolerate
     // transient CPU spikes or network glitches before concluding it's dead.
+    // IMPORTANT: etcdctl endpoint health returns exit code 0 even when the
+    // response says "unhealthy" — we must check the output content too.
     const authArgs = getAuthArgs();
     const healthCmd = ['etcdctl', ...authArgs, 'endpoint', 'health'];
     let healthy = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        healthy = await execWithTimeout(container, healthCmd, 10000);
+        const result = await execWithOutput(container, healthCmd, 10000);
+        healthy = result.success && result.output.includes('is healthy');
         if (healthy) break;
       } catch (e) {
         console.warn(`[ETCD] Health check attempt ${attempt + 1} failed: ${e.message}`);
