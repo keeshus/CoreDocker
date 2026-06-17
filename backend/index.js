@@ -203,6 +203,16 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Startup readiness check — returns 503 until etcd is responsive
+app.get('/api/health/ready', async (req, res) => {
+  try {
+    await etcd.put('__health_check').value(Date.now().toString());
+    res.json({ ready: true, uptime: process.uptime() });
+  } catch (e) {
+    res.status(503).json({ ready: false, error: e.message, uptime: process.uptime() });
+  }
+});
+
 let _servicesStarted = false;
 
 const bootCluster = async (nodeId) => {
@@ -226,7 +236,6 @@ const bootCluster = async (nodeId) => {
         try {
           await runMigrations(migrations);
           console.log('[Cluster] Migrations complete.');
-          await reconnectEtcd(); // fresh connection = reset circuit breaker
           startScheduler();
           startReconciler(nodeId);
           setTimeout(() => startOrchestrator(nodeId), 60000);
@@ -366,7 +375,20 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
     const { mode, password, primaryIp, joinToken } = req.body;
 
     if (mode === 'create' || !mode) {
-      await initializeSystem(password);
+      // Retry with etcd reconnect in case the circuit breaker opened during startup
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await initializeSystem(password);
+          break;
+        } catch (e) {
+          if (e.message?.includes('circuit breaker') || e.message?.includes('Execution prevented')) {
+            console.log(`[Setup] Circuit breaker open on attempt ${attempt + 1}, reconnecting etcd...`);
+            await reconnectEtcd();
+            if (attempt < 2) continue;
+          }
+          throw e;
+        }
+      }
       JWT_SECRET = getJwtSecret();
       if (!JWT_SECRET) {
         // Fallback for backward compat — shouldn't happen with new init

@@ -15,6 +15,7 @@ import { UIProvider, useUI } from '../lib/UIProvider';
 
 function HomeInner() {
   const { showToast, showConfirm } = useUI();
+  const [booting, setBooting] = useState(true);
   const [activeTab, setActiveTab] = useState('containers');
   const [containers, setContainers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -50,6 +51,21 @@ function HomeInner() {
       console.error('Refresh error:', err);
     }
   };
+
+  // Poll health/ready until the backend is fully booted
+  useEffect(() => {
+    let cancelled = false;
+    (async function pollReady() {
+      while (!cancelled) {
+        try {
+          const res = await fetch('/api/health/ready');
+          if (res.ok) { setBooting(false); return; }
+        } catch {}
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     refreshData().finally(() => setLoading(false));
@@ -187,6 +203,15 @@ function HomeInner() {
       showToast('Failed to delete group: ' + e.message, 'error');
     }
   };
+
+  if (booting) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'sans-serif', color: '#64748b', gap: '20px' }}>
+      <div style={{ width: '40px', height: '40px', border: '3px solid #e2e8f0', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+      <div style={{ fontSize: '1.2em', fontWeight: 'bold', color: '#1e293b' }}>CoreDocker is starting up...</div>
+      <div style={{ fontSize: '0.9em' }}>Please wait while services initialize.</div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 
   if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
   

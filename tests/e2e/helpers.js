@@ -77,10 +77,12 @@ export async function waitForNode(nodeKey, timeoutMs = 180000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const { status, data } = await api(nodeKey, '/api/system/status');
-      if (status === 200 && data && !data.error) {
-        console.log(`  ${nodeKey} ready (${data.nodeName || 'unknown'})`);
-        return data;
+      const { status, data } = await api(nodeKey, '/api/health/ready');
+      if (status === 200 && data?.ready) {
+        const s = await api(nodeKey, '/api/system/status');
+        const name = s.data?.nodeName || s.data?.nodeId || 'unknown';
+        console.log(`  ${nodeKey} ready (${name})`);
+        return s.data;
       }
     } catch {}
     await new Promise(r => setTimeout(r, 5000));

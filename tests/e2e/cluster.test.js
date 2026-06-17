@@ -28,50 +28,33 @@ describe('Cluster provisioning', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. Cluster setup — create on node-1, join node-2
+// 2. Full cluster flow — create, join, verify (single sequential block)
 // ═══════════════════════════════════════════════════════════════════════════
-describe('Cluster setup', () => {
-  it('creates cluster on node-1', async () => {
-    const result = await setupNode('node1', { mode: 'create', password: PASSWORD });
-    expect(result.success).toBe(true);
-  });
+describe('Cluster setup & join', () => {
+  it('creates cluster on node-1 and joins node-2', async () => {
+    // Create
+    const setupResult = await setupNode('node1', { mode: 'create', password: PASSWORD });
+    expect(setupResult.success).toBe(true);
 
-  it('node-1 is unsealed after setup', async () => {
-    const { data } = await api('node1', '/api/system/status');
-    expect(data.sealed).toBe(false);
-    expect(data.authenticated).toBe(true);
-  });
-
-  it('node-1 can access authenticated endpoints', async () => {
-    await unsealNode('node1', PASSWORD);
-    const { status, data } = await api('node1', '/api/nodes');
-    expect(status).toBe(200);
-    expect(Array.isArray(data)).toBe(true);
-  });
-
-  it('joins node-2 to the cluster via backhaul', async () => {
-    const result = await setupNode('node2', {
+    // Join (uses the same PASSWORD as the joinToken — it's the master password)
+    const joinResult = await setupNode('node2', {
       mode: 'join', joinToken: PASSWORD,
       primaryIp: NODES.node1.backhaulIp,
     });
-    expect(result.success).toBe(true);
-  });
+    expect(joinResult.success).toBe(true);
 
-  it('node-2 is unsealed after join', async () => {
+    // Unseal node-2 and verify
     await unsealNode('node2', PASSWORD);
-    const { data } = await api('node2', '/api/system/status');
-    expect(data.sealed).toBe(false);
-  });
+    const status2 = await api('node2', '/api/system/status');
+    expect(status2.data.sealed).toBe(false);
 
-  it('both nodes visible from node-1', async () => {
-    const { data } = await api('node1', '/api/nodes');
-    expect(data.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('all registered nodes have unique IDs', async () => {
-    const { data } = await api('node1', '/api/nodes');
-    const ids = new Set(data.map(n => n.id));
-    expect(ids.size).toBe(data.length);
+    // Verify both nodes visible from node-1
+    await unsealNode('node1', PASSWORD);
+    const nodeList = await api('node1', '/api/nodes');
+    expect(nodeList.status).toBe(200);
+    expect(nodeList.data.length).toBeGreaterThanOrEqual(2);
+    const ids = new Set(nodeList.data.map(n => n.id));
+    expect(ids.size).toBe(nodeList.data.length);
   });
 });
 

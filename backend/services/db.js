@@ -124,7 +124,7 @@ export const waitForEtcd = async (retries = 60, delay = 2000) => {
 
       if (i === retries - 1) throw new Error(`Could not connect to ETCD after ${retries} attempts: ${e.message}`);
 
-      reconnectEtcd();
+      await reconnectEtcd();
 
       await new Promise(resolve => setTimeout(resolve, delay));
     }
