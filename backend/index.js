@@ -375,20 +375,19 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
     const { mode, password, primaryIp, joinToken } = req.body;
 
     if (mode === 'create' || !mode) {
-      // Retry with etcd reconnect in case the circuit breaker opened during startup
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // Pre-check: ensure etcd is responsive before starting setup
+      for (let attempt = 0; attempt < 5; attempt++) {
         try {
-          await initializeSystem(password);
+          await etcd.put('__pre_setup_check').value(Date.now().toString());
           break;
         } catch (e) {
-          if (e.message?.includes('circuit breaker') || e.message?.includes('Execution prevented')) {
-            console.log(`[Setup] Circuit breaker open on attempt ${attempt + 1}, reconnecting etcd...`);
-            await reconnectEtcd();
-            if (attempt < 2) continue;
-          }
-          throw e;
+          console.log(`[Setup] etcd pre-check failed (${e.message}), reconnecting...`);
+          await reconnectEtcd();
+          if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
+          else throw new Error('etcd not available after retries');
         }
       }
+      await initializeSystem(password);
       JWT_SECRET = getJwtSecret();
       if (!JWT_SECRET) {
         // Fallback for backward compat — shouldn't happen with new init

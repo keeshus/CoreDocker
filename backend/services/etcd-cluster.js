@@ -352,6 +352,16 @@ export const bootstrapEtcd = async () => {
         '2380/tcp': [{ HostPort: '2380' }],
       };
     }
+
+    // Wipe stale Raft data when starting standalone (no cluster config).
+    // A partial join from a previous lifecycle may have left members in the
+    // WAL that will block quorum. This is ONLY done when there's NO cluster
+    // config — meaning the node was never successfully part of a real cluster.
+    // Nodes with a cluster config take the clustered path above and keep data.
+    const d = getEtcdDataHostPath();
+    try { if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true }); } catch (e) {
+      console.warn(`[ETCD] Failed to wipe stale data: ${e.message}`);
+    }
   }
 
   const createOpts = {
