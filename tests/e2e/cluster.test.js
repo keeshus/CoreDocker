@@ -1,10 +1,16 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { api, waitForNode, setupNode, NODES, poll } from './helpers.js';
+import { api, waitForNode, setupNode, ssh, NODES, poll } from './helpers.js';
 
 const PASSWORD = process.env.E2E_PASSWORD || 'TestCluster123!';
 
 describe('CoreDocker Cluster', () => {
   beforeAll(async () => {
+    // Reset etcd on all nodes to clear stale state from previous runs
+    for (const key of Object.keys(NODES)) {
+      try {
+        ssh(key, 'sudo docker stop core-docker-etcd 2>/dev/null; sudo docker rm core-docker-etcd 2>/dev/null; sudo rm -rf /opt/coredocker/data/backup/__system__/etcd-data; sudo docker restart core-docker-backend 2>/dev/null');
+      } catch {}
+    }
     await waitForNode('node1', 300000);
   }, 360000);
 
