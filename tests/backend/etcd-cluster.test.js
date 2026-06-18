@@ -57,6 +57,12 @@ function makeContainerMock(overrides = {}) {
       }),
       inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
     }),
+    modem: {
+      demuxStream: vi.fn((stream, stdout) => {
+        stream.on('data', (chunk) => stdout.write(chunk));
+        stream.on('end', () => stdout.end());
+      }),
+    },
     stop: vi.fn().mockResolvedValue(),
     remove: vi.fn().mockResolvedValue(),
     start: vi.fn().mockResolvedValue(),
@@ -75,7 +81,12 @@ const mockDocker = {
   getContainer: vi.fn().mockImplementation(() => makeContainerMock()),
   createContainer: vi.fn().mockResolvedValue(makeContainerMock()),
   pull: vi.fn().mockResolvedValue(),
-  modem: { followProgress: vi.fn((_stream, cb) => cb(null, {})) },
+  modem: {
+    followProgress: vi.fn((_stream, cb) => cb(null, {})),
+    demuxStream: vi.fn((_stream, stdout) => {
+      _stream.on('data', (chunk) => stdout.write(chunk));
+    }),
+  },
   listNetworks: vi.fn().mockResolvedValue([]),
   getImage: vi.fn().mockReturnValue({ inspect: vi.fn().mockResolvedValue({}) }),
   getNetwork: vi.fn().mockReturnValue({ remove: vi.fn().mockResolvedValue() }),
