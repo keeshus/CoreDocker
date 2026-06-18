@@ -4,6 +4,8 @@ import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import https from 'https';
+import fs from 'fs';
+import path from 'path';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import containerRoutes from './routes/containers.js';
@@ -15,8 +17,8 @@ import taskRoutes from './routes/tasks.js';
 import settingsRoutes from './routes/settings.js';
 import groupRoutes from './routes/groups.js';
 import {reconcileContainers, startReconciler, stopReconciler} from './services/reconciler.js';
-import {bootstrapEtcd, addEtcdMember, migrateToCluster, clearClusterConfig} from './services/etcd-cluster.js';
-import {closeEtcd, etcd, registerLocalNode, waitForEtcd, saveNode, updateEtcdHosts, reconnectEtcd} from './services/db.js';
+import {bootstrapEtcd, addEtcdMember, migrateToCluster, clearClusterConfig, promoteEtcdMember} from './services/etcd-cluster.js';
+import {closeEtcd, etcd, registerLocalNode, waitForEtcd, saveNode, updateEtcdHosts, reconnectEtcd, setEtcdHosts} from './services/db.js';
 import {startScheduler, stopScheduler} from './services/scheduler.js';
 import {startOrchestrator, stopOrchestrator} from './services/orchestrator.js';
 import {bootstrapNginx, getNodeUrl} from './services/nginx.js';
@@ -435,9 +437,14 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
       await migrateToCluster(joinData.clusterConfig);
       console.log(`[Cluster] Migration complete in ${Date.now() - migrateStart}ms`);
 
-      // Update ETCD hosts to point to all cluster members
-      if (joinData.clusterConfig.memberClientUrls && joinData.clusterConfig.memberClientUrls.length > 0) {
-        updateEtcdHosts(joinData.clusterConfig.memberClientUrls);
+      // Set hosts to the primary node only (a voting member). Don't reconnect
+      // yet — the auth credentials block below will do that. This avoids a
+      // race condition from concurrent reconnectEtcd() calls.
+      // The local etcd is a learner at this point and can't handle write
+      // operations ("rpc not supported for learner") until promoted.
+      const primaryClientUrl = joinData.clusterConfig.primaryClientUrl || joinData.clusterConfig.memberClientUrls?.[0];
+      if (primaryClientUrl) {
+        setEtcdHosts([primaryClientUrl]);
       }
 
       // Save etcd auth credentials from master node for authenticated connection
@@ -478,9 +485,12 @@ app.post('/api/system/setup', upload.single('snapshotFile'), async (req, res) =>
         JWT_SECRET = await getOrCreateJwtSecret();
       }
 
-      // Register this node with the clustered etcd
-      await registerLocalNode(nodeId, nodeName, nodeIp, clientIp);
-      await bootCluster(nodeId);
+      // Register this node with the clustered etcd.
+      // Use the id from the join response so saveNode (join handler) and
+      // registerLocalNode use the same UUID — otherwise each node appears twice.
+      const clusterNodeId = joinData.id || nodeId;
+      await registerLocalNode(clusterNodeId, nodeName, nodeIp, clientIp);
+      await bootCluster(clusterNodeId);
       logEvent('security', 'info', 'System initialized (join)', { nodeId, nodeName, primaryIp });
     } else if (mode === 'restore') {
       const snapshotFile = req.file;
@@ -538,21 +548,34 @@ app.post('/api/system/join', async (req, res) => {
     // Read all static config BEFORE adding as etcd member — after member add,
     // Raft requires majority (2/2) and the joining node isn't ready to vote yet.
     let keepalivedPassword, clusterToken, authUsername, authPassword;
+    const authDir = '/mnt/backup/__system__/etcd';
+    const configFile = path.join(authDir, 'cluster-config.json');
+    const authFile = path.join(authDir, 'auth.json');
+
+    // Keepalived password may not exist yet on first join — read separately
+    // so a missing key doesn't block auth credential propagation.
     try {
-      const authDir = '/mnt/backup/__system__/etcd';
-      const configFile = path.join(authDir, 'cluster-config.json');
-      const authFile = path.join(authDir, 'auth.json');
       keepalivedPassword = await etcd.get('__system__/keepalived/password').string();
+    } catch (e) {
+      console.warn('[Join] keepalived password not found in etcd:', e.message);
+    }
+
+    try {
       if (fs.existsSync(configFile)) {
         clusterToken = JSON.parse(fs.readFileSync(configFile, 'utf8')).clusterToken;
       }
+    } catch (e) {
+      console.warn('[Join] Could not read cluster config:', e.message);
+    }
+
+    try {
       if (fs.existsSync(authFile)) {
         const a = JSON.parse(fs.readFileSync(authFile, 'utf8'));
         authUsername = a.username;
         authPassword = a.password;
       }
     } catch (e) {
-      console.warn('[Join] Could not read config/auth:', e.message);
+      console.warn('[Join] Could not read auth credentials:', e.message);
     }
 
     await saveNode(id, name, ip, 'online', joinClientIp);
@@ -576,12 +599,38 @@ app.post('/api/system/join', async (req, res) => {
         initialCluster: clusterInfo.initialCluster,
         initialClusterState: clusterInfo.initialClusterState || 'existing',
         memberClientUrls: allUrls,
+        primaryClientUrl: `http://${nodeIp}:2379`,
         clusterToken,
         authUsername,
         authPassword,
         keepalivedPassword,
       },
     });
+
+    // Schedule promotion of the learner after a delay to allow the joining
+    // node's etcd to start in cluster mode and catch up with the Raft log.
+    // Running promote here on the primary (a voting member) avoids the issue
+    // where a learner can't forward etcdctl commands to the leader.
+    setTimeout(async () => {
+      try {
+        console.log(`[Join] Promoting learner ${name} to voting member...`);
+        await promoteEtcdMember(name);
+        console.log(`[Join] ${name} promoted to voting member.`);
+      } catch (e) {
+        console.warn(`[Join] Could not promote ${name} (will retry): ${e.message}`);
+        // Retry up to 5 times with increasing delays
+        for (let retry = 0; retry < 5; retry++) {
+          await new Promise(r => setTimeout(r, 5000));
+          try {
+            await promoteEtcdMember(name);
+            console.log(`[Join] ${name} promoted on retry ${retry + 1}.`);
+            break;
+          } catch (e2) {
+            console.warn(`[Join] Promote retry ${retry + 1} failed: ${e2.message}`);
+          }
+        }
+      }
+    }, 15000);
   } catch (e) {
     res.status(400).json({ error: e.message, code: 'JOIN_FAILED' });
   }

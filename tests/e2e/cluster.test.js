@@ -11,7 +11,11 @@ describe('CoreDocker Cluster', () => {
         ssh(key, 'sudo docker stop core-docker-etcd 2>/dev/null; sudo docker rm core-docker-etcd 2>/dev/null; sudo rm -rf /opt/coredocker/data/backup/__system__/etcd-data; sudo docker restart core-docker-backend 2>/dev/null');
       } catch {}
     }
-    await waitForNode('node1', 300000);
+    await Promise.all([
+      waitForNode('node1', 300000),
+      waitForNode('node2', 300000),
+      waitForNode('node3', 300000),
+    ]);
   }, 360000);
 
   it('creates cluster on node-1 and runs all single-node operations', async () => {
@@ -83,13 +87,57 @@ describe('CoreDocker Cluster', () => {
     });
     expect(bad.status).toBe(400);
 
-    // Step 9: Join node-2 (final step — after this, etcd has 2 members and needs quorum)
-    const joinResult = await api('node1', '/api/system/join', {
+    // Step 9: Join node-2 to cluster via proper setup flow.
+    // This calls node-2's /api/system/setup with mode=join, which internally:
+    //   - Calls node-1's /api/system/join to add node-2 as an etcd member
+    //   - Runs migrateToCluster() to reconfigure node-2's etcd in cluster mode
+    //   - Saves auth creds from node-1, reconnects etcd3 client
+    //   - Unseals node-2, registers it, and boots cluster services
+    const joinResult = await api('node2', '/api/system/setup', {
       method: 'POST',
-      body: JSON.stringify({ name: 'node-2', ip: '10.100.0.11', clientIp: '192.168.100.11' }),
-      headers: { 'Authorization': `Bearer ${PASSWORD}` },
+      body: JSON.stringify({ mode: 'join', primaryIp: '192.168.100.10', joinToken: PASSWORD, password: PASSWORD }),
+      timeout: 180000,
     });
     expect(joinResult.status).toBe(200);
     expect(joinResult.data.success).toBe(true);
+
+    // Step 10: Wait for node-2 to become healthy with clustered etcd
+    const n2status = await waitForNode('node2', 120000);
+    expect(n2status.sealed).toBe(false);
+
+    // Step 11: Verify both nodes are visible in the cluster
+    const nodesAfterJoin = await api('node1', '/api/nodes');
+    expect(nodesAfterJoin.status).toBe(200);
+    expect(nodesAfterJoin.data.length).toBeGreaterThanOrEqual(2);
+    expect(nodesAfterJoin.data.find(n => n.name === 'node-2')).toBeTruthy();
+
+    // Step 12: Node-2 can read data from the cluster etcd
+    const n2nodes = await api('node2', '/api/nodes');
+    expect(n2nodes.status).toBe(200);
+    expect(n2nodes.data.length).toBeGreaterThanOrEqual(2);
+
+    // Step 13: Join node-3 to cluster via proper setup flow
+    const join3Result = await api('node3', '/api/system/setup', {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'join', primaryIp: '192.168.100.10', joinToken: PASSWORD, password: PASSWORD }),
+      timeout: 180000,
+    });
+    expect(join3Result.status).toBe(200);
+    expect(join3Result.data.success).toBe(true);
+
+    // Step 14: Wait for node-3 to become healthy
+    const n3status = await waitForNode('node3', 120000);
+    expect(n3status.sealed).toBe(false);
+
+    // Step 15: All three nodes visible from node-1
+    const nodesAll = await api('node1', '/api/nodes');
+    expect(nodesAll.status).toBe(200);
+    expect(nodesAll.data.length).toBeGreaterThanOrEqual(3);
+    expect(nodesAll.data.find(n => n.name === 'node-3')).toBeTruthy();
+
+    // Step 16: Node-3 reads from cluster
+    const n3nodes = await api('node3', '/api/nodes');
+    expect(n3nodes.status).toBe(200);
+    expect(n3nodes.data.length).toBeGreaterThanOrEqual(3);
   }, 300000);
 });

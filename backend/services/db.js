@@ -108,7 +108,20 @@ export const updateEtcdHosts = (newHosts) => {
   process.env.ETCD_HOSTS = hostStr;
   etcdHosts = hostStr.split(',');
   console.log(`[DB] Switching ETCD hosts to: ${hostStr}`);
-  reconnectEtcd(etcdHosts);
+  return reconnectEtcd(etcdHosts);
+};
+
+/**
+ * Update the etcd host list without reconnecting. Used when the next
+ * reconnectEtcd() call will pick up the new hosts. Avoids the race
+ * condition from multiple concurrent reconnectEtcd() calls.
+ */
+export const setEtcdHosts = (hosts) => {
+  if (!hosts || hosts.length === 0) return;
+  const hostStr = Array.isArray(hosts) ? hosts.join(',') : hosts;
+  process.env.ETCD_HOSTS = hostStr;
+  etcdHosts = hostStr.split(',');
+  console.log(`[DB] Set ETCD hosts to: ${hostStr}`);
 };
 
 export const waitForEtcd = async (retries = 60, delay = 2000) => {

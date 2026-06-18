@@ -73,6 +73,12 @@ check_prereqs() {
     err "python3 is required to serve the repo tarball"
     exit 1
   fi
+  # virt-customize is optional but recommended — it injects SSH keys directly
+  # into the disk images as a failsafe when cloud-init's ssh_authorized_keys
+  # doesn't apply correctly (e.g. on recreate).
+  if ! command -v virt-customize &>/dev/null; then
+    warn "virt-customize not found — install libguestfs-tools for reliable SSH key injection"
+  fi
 }
 
 # ════════════════════════════════════════════════════════
@@ -290,6 +296,14 @@ create_vm() {
   if [ ! -f "$disk_file" ]; then
     log "Creating disk for $node_name..."
     qemu-img create -f qcow2 -b "$CLOUD_IMAGE_FILE" -F qcow2 "$disk_file" "${VM_DISK_GB}G"
+    # Inject SSH key directly into the disk as a failsafe — some cloud-init
+    # runs (especially on recreate) miss the ssh_authorized_keys directive.
+    if command -v virt-customize &>/dev/null; then
+      log "Injecting SSH key into $node_name disk..."
+      virt-customize -a "$disk_file" \
+        --ssh-inject coredocker:file:"$SSH_KEY_PUB" \
+        --selinux-relabel 2>&1 | grep -v "libguestfs: warning" || true
+    fi
   fi
 
   log "Launching $node_name (public=$node_ip, backhaul=$backhaul_mac)..."

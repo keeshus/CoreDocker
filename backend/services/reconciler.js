@@ -7,6 +7,7 @@ import { ensureContainerNetworks, ensureGroupNetwork } from './network-manager.j
 import { isNodeSealed } from './secrets.js';
 import { buildCreateOpts } from '../utils/docker-opts.js';
 import { runEphemeralTask } from './ephemeral-tasks.js';
+import { promoteEtcdMember, addEtcdMember } from './etcd-cluster.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -471,6 +472,49 @@ export const reconcileContainers = async (localNodeId) => {
 
 let reconcilerInterval = null;
 
+/**
+ * Periodic check: promote any etcd learner members that have caught up.
+ * This ensures learners eventually become voting members after sync completes.
+ * Runs as part of the reconciler loop since it already has the right cadence.
+ */
+const reconcileLearners = async () => {
+  try {
+    const container = docker.getContainer('core-docker-etcd');
+    const exec = await container.exec({
+      Cmd: ['etcdctl', '--endpoints=127.0.0.1:2379', '--command-timeout=10s', 'member', 'list'],
+      AttachStdout: true, AttachStderr: true,
+    });
+    const output = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timeout')), 15000);
+      exec.start(async (err, stream) => {
+        if (err) { clearTimeout(timer); reject(err); return; }
+        let data = '';
+        stream.on('data', c => data += c.toString());
+        stream.on('end', () => { clearTimeout(timer); resolve(data); });
+      });
+    }).catch(() => '');
+    if (!output) return;
+
+    for (const line of output.trim().split('\n')) {
+      const cols = line.split(', ');
+      if (cols.length >= 6 && cols[5] === 'true') {
+        const memberName = cols[2];
+        console.log(`[Reconciler] Found learner ${memberName}, promoting...`);
+        try {
+          await promoteEtcdMember(memberName);
+          console.log(`[Reconciler] ${memberName} promoted.`);
+        } catch (e) {
+          console.warn(`[Reconciler] Promote failed for ${memberName}: ${e.message}`);
+        }
+      }
+    }
+  } catch (e) {
+    if (!e.message?.includes('not found') && !e.message?.includes('UNAVAILABLE')) {
+      console.warn(`[Reconciler] Learner check error: ${e.message}`);
+    }
+  }
+};
+
 export const startReconciler = (localNodeId) => {
   if (reconcilerInterval) {
     clearInterval(reconcilerInterval);
@@ -484,6 +528,7 @@ export const startReconciler = (localNodeId) => {
           await reconcileDNSVIP(localNodeId);
         }
         await reconcileNetworks(localNodeId);
+        await reconcileLearners();
       } catch (e) {
         console.error('[Reconciler] Periodic reconciliation error:', e.message);
       }

@@ -3,6 +3,7 @@ import { SYSTEM_NAMESPACE, resolveHostPath } from './ephemeral-tasks.js';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { PassThrough } from 'stream';
 
 const ETCD_IMAGE = process.env.ETCD_IMAGE || 'gcr.io/etcd-development/etcd:v3.6.8';
 const CONTAINER_NAME = 'core-docker-etcd';
@@ -45,15 +46,22 @@ async function execWithOutput(container, cmd, timeoutMs = 30000) {
     const timer = setTimeout(() => reject(new Error(`Exec timed out after ${timeoutMs}ms: ${cmd.join(' ')}`)), timeoutMs);
     exec.start(async (err, stream) => {
       if (err) { clearTimeout(timer); reject(err); return; }
-      let data = '';
-      stream.on('data', chunk => data += chunk.toString());
+      // Docker's multiplexed stream uses 8-byte frame headers per chunk.
+      // Demux into separate stdout/stderr streams to get clean output.
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      let stdoutData = '';
+      let stderrData = '';
+      stdout.on('data', c => stdoutData += c.toString());
+      stderr.on('data', c => stderrData += c.toString());
+      container.modem.demuxStream(stream, stdout, stderr);
       stream.on('end', async () => {
         clearTimeout(timer);
         try {
           const insp = await exec.inspect();
-          resolve({ success: insp.ExitCode === 0, output: data });
+          resolve({ success: insp.ExitCode === 0, output: stdoutData, stderr: stderrData });
         } catch (inspectErr) {
-          resolve({ success: false, output: data });
+          resolve({ success: false, output: stdoutData, stderr: stderrData });
         }
       });
     });
@@ -296,9 +304,28 @@ export const bootstrapEtcd = async () => {
 
   if (clusterConfig) {
     // Clustered mode — use saved peer URLs
-    console.log('[ETCD] Found cluster config, starting as clustered member.');
+    // Use --initial-cluster-state=new when the data directory is empty (first boot)
+    // and 'existing' when there's a WAL (subsequent restarts)
+    const dataDir = getEtcdDataHostPath();
+    const hasWAL = fs.existsSync(path.join(dataDir, 'member', 'wal'));
+    const clusterState = hasWAL ? 'existing' : 'new';
+
+    console.log(`[ETCD] Found cluster config, starting as clustered member (state=${clusterState}).`);
     const members = clusterConfig.members || [];
-    const initialCluster = members.map(m => `${m.name}=http://${m.ip}:2380`).join(',');
+    // When starting with a fresh data directory (state=new), only include the
+// local member in --initial-cluster. Stale peers from a previous join would
+// prevent quorum since they're not actually running. They'll be re-added
+// dynamically when they rejoin.
+let activeMembers;
+if (clusterState === 'new') {
+  const localMembers = members.filter(m => m.name === etcdName);
+  activeMembers = localMembers.length > 0
+    ? localMembers
+    : [{ name: etcdName, ip: advertiseIp || '127.0.0.1' }];
+} else {
+  activeMembers = members;
+}
+const initialCluster = activeMembers.map(m => `${m.name}=http://${m.ip}:2380`).join(',');
     const memberEntry = members.find(m => m.name === etcdName);
     const memberIp = memberEntry ? memberEntry.ip : (advertiseIp || '127.0.0.1');
 
@@ -310,8 +337,9 @@ export const bootstrapEtcd = async () => {
       '--listen-peer-urls', 'http://0.0.0.0:2380',
       '--initial-advertise-peer-urls', `http://${memberIp}:2380`,
       '--initial-cluster', initialCluster,
-      '--initial-cluster-state', 'existing',
+      '--initial-cluster-state', clusterState,
       '--initial-cluster-token', clusterConfig.clusterToken || 'core-docker-cluster',
+      '--max-learners', '5',
       '--data-dir', '/etcd-data',
       '--logger', 'zap',
       '--log-outputs', 'stderr',
@@ -330,7 +358,7 @@ export const bootstrapEtcd = async () => {
       ? `http://${advertiseIp}:2380`
       : `http://${CONTAINER_NAME}:2380`;
 
-    clusterToken = crypto.randomBytes(16).toString('hex');
+    clusterToken = 'core-docker-cluster';  // fixed token so restarts match
     keepalivedPass = process.env.KEEPALIVED_PASSWORD || crypto.randomBytes(16).toString('hex');
 
     cmd = [
@@ -343,6 +371,7 @@ export const bootstrapEtcd = async () => {
       '--initial-cluster', `${etcdName}=${peerUrl}`,
       '--initial-cluster-token', clusterToken,
       '--initial-cluster-state', 'new',
+      '--max-learners', '5',
       '--data-dir', '/etcd-data',
       '--logger', 'zap',
       '--log-outputs', 'stderr',
@@ -397,58 +426,97 @@ export const bootstrapEtcd = async () => {
     await newContainer.start();
     console.log('[ETCD] Container created and started.');
 
-    // Enable etcd authentication on first bootstrap (not on restart from config)
-    if (!clusterConfig) {
-      const rootPass = crypto.randomBytes(32).toString('hex');
+    // Wait for etcd to be ready before any commands
+    for (let i = 0; i < 30; i++) {
+      try {
+        const ready = await execWithTimeout(newContainer, ['etcdctl', 'endpoint', 'health'], 5000);
+        if (ready) break;
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log('[ETCD] Ready, configuring authentication...');
 
-      // Wait for etcd to be ready before running auth commands.
-      // Docker exec hangs if the target command doesn't exit, so all
-      // exec calls use execWithTimeout to ensure forward progress.
-      for (let i = 0; i < 30; i++) {
-        try {
-          const ready = await execWithTimeout(newContainer, ['etcdctl', 'endpoint', 'health'], 5000);
-          if (ready) break;
-        } catch (e) {}
+    // Run auth setup on EVERY new container — not just on first bootstrap.
+    // The health check wipe path recreates the container but would skip auth
+    // if clusterConfig already exists, leaving the server without auth while
+    // auth.json is still on disk.
+    const rootPass = crypto.randomBytes(32).toString('hex');
+    for (let i = 0; i < 20; i++) {
+      try {
+        // Check if auth is already enabled — if so, skip setup
+        const status = await execWithOutput(newContainer, ['etcdctl', 'auth', 'status'], 5000);
+        if (status.output.includes('Authentication enabled')) {
+          console.log('[ETCD] Auth already enabled, reusing existing config.');
+          break;
+        }
+      } catch {}
+
+      try {
+        // Attempt to add root user — fails harmlessly if already exists
+        await execWithTimeout(newContainer, ['etcdctl', 'user', 'add', `root:${rootPass}`]);
+      } catch (e) {
+        console.log(`[ETCD] Waiting for auth readiness (user add)... ${e.message}`);
         await new Promise(r => setTimeout(r, 1000));
+        continue;
       }
-      console.log('[ETCD] Ready, setting up authentication...');
 
-      for (let i = 0; i < 10; i++) {
-        try {
-          // Attempt to add root user — fails harmlessly if already exists
-          await execWithTimeout(newContainer, ['etcdctl', 'user', 'add', `root:${rootPass}`]);
-        } catch (e) {
-          // Timeout — etcd might not be ready yet
-          console.log(`[ETCD] Waiting for etcd readiness (auth setup)... ${e.message}`);
-          await new Promise(r => setTimeout(r, 1000));
-          continue;
-        }
-
-        // Enable authentication (idempotent — safe to call even if user already exists)
-        try {
-          await execWithTimeout(newContainer, ['etcdctl', 'auth', 'enable']);
-        } catch (e) {
-          console.log(`[ETCD] Waiting for etcd readiness (auth enable)... ${e.message}`);
-          await new Promise(r => setTimeout(r, 1000));
-          continue;
-        }
-
-        // Save credentials
-        const authPath = `${BACKUP_MOUNT}/${SYSTEM_NAMESPACE}/etcd/auth.json`;
-        const dir = path.dirname(authPath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(authPath, JSON.stringify({ username: 'root', password: rootPass }, null, 2));
-        console.log('[ETCD] Authentication enabled.');
-        break;
+      try {
+        await execWithTimeout(newContainer, ['etcdctl', 'auth', 'enable']);
+      } catch (e) {
+        console.log(`[ETCD] Waiting for auth readiness (auth enable)... ${e.message}`);
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
       }
+
+      // Save credentials
+      const authPath = `${BACKUP_MOUNT}/${SYSTEM_NAMESPACE}/etcd/auth.json`;
+      const dir = path.dirname(authPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(authPath, JSON.stringify({ username: 'root', password: rootPass }, null, 2));
+      console.log('[ETCD] Authentication enabled.');
+      break;
     }
 
+    // Write cluster config so subsequent boots use the clustered path (always-cluster-mode)
+    writeClusterConfig({
+      clusterToken,
+      members: [{ name: etcdName, ip: advertiseIp || "127.0.0.1" }],
+      keepalivedPassword: keepalivedPass,
+    });
     return true;
   } catch (err) {
     console.error('[ETCD] Failed to create container:', err.message);
     return false;
   }
 };
+
+/**
+ * Find an etcd member ID (as hex string) by peer URL, or null if not found.
+ * Uses the simple text output format to avoid JavaScript uint64 precision loss
+ * that occurs when parsing JSON numbers. Returns the hex ID which etcdctl
+ * member remove accepts directly.
+ */
+async function findMemberByPeerUrl(container, authArgs, peerUrl) {
+  const listCmd = [
+    'etcdctl', '--endpoints=127.0.0.1:2379', '--command-timeout=15s',
+    ...authArgs, 'member', 'list',
+  ];
+  try {
+    const { success, output } = await execWithOutput(container, listCmd, 20000);
+    if (success && output) {
+      // Output format per line: <hex-id>, <status>, <name>, <peer-url>, <client-url>, <is-learner>
+      for (const line of output.trim().split('\n')) {
+        const cols = line.split(', ');
+        if (cols.length >= 4 && cols[3] === peerUrl) {
+          return cols[0]; // Hex ID as string — safe for member remove
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[ETCD] Could not list members: ${e.message}`);
+  }
+  return null;
+}
 
 /**
  * Add a new member to the local ETCD cluster and return structured join info.
@@ -464,26 +532,49 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
   const authArgs = getAuthArgs();
   const container = docker.getContainer(CONTAINER_NAME);
 
-  console.log(`[ETCD] Adding member ${nodeName} with peer URL http://${nodeIp}:2380`);
+  const peerUrl = `http://${nodeIp}:2380`;
+  console.log(`[ETCD] Adding learner member ${nodeName} with peer URL ${peerUrl}`);
+
+  // Check if a member with this peer URL already exists (stale from a previous
+  // failed join). If so, remove it first so re-joining is idempotent.
+  const existingId = await findMemberByPeerUrl(container, authArgs, peerUrl);
+  if (existingId) {
+    console.log(`[ETCD] Stale member with peer URL ${peerUrl} found (ID: ${existingId}), removing...`);
+    const removeCmd = [
+      'etcdctl', '--endpoints=127.0.0.1:2379', '--command-timeout=30s',
+      ...authArgs, 'member', 'remove', String(existingId),
+    ];
+    const { success: removed } = await execWithOutput(container, removeCmd, 60000);
+    if (removed) {
+      console.log(`[ETCD] Stale member removed.`);
+    } else {
+      console.warn(`[ETCD] Failed to remove stale member, attempting add anyway...`);
+    }
+  }
+
   // Single etcdctl call with generous timeout — runs inside the etcd container
-  // via docker exec, bypassing the etcd3 client's circuit breaker
+  // via docker exec, bypassing the etcd3 client's circuit breaker.
+  // Using --learner so the new member doesn't count toward Raft quorum until
+  // explicitly promoted — this prevents the cluster from deadlocking while
+  // the joining node starts its etcd in cluster mode.
   const memberAddCmd = [
     'etcdctl',
     '--endpoints=127.0.0.1:2379',
     '--command-timeout=60s',
     ...authArgs,
     'member', 'add', nodeName,
+    '--learner',
     '--peer-urls', `http://${nodeIp}:2380`,
   ];
 
-  const { success, output } = await execWithOutput(container, memberAddCmd, 120000);
+  const { success, output, stderr } = await execWithOutput(container, memberAddCmd, 120000);
 
   if (!success) {
-    const cleanOutput = output.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
-    throw new Error(`etcdctl member add failed: ${cleanOutput}`);
+    const cleanOutput = (output + '\n' + (stderr || '')).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+    throw new Error(`etcdctl member add failed: ${cleanOutput.trim()}`);
   }
 
-  console.log(`[ETCD] Member added: ${nodeName}`);
+  console.log(`[ETCD] Learner member added: ${nodeName}`);
 
   // Get member list to build client URLs
   const memberListCmd = [
@@ -494,12 +585,14 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
   ];
 
   let allClientUrls = [];
+  let allMembers = [];
   try {
     const { success: listSuccess, output: listOutput } = await execWithOutput(container, memberListCmd, 30000);
     if (listSuccess && listOutput) {
       const memberList = JSON.parse(listOutput);
       if (memberList.members) {
-        allClientUrls = memberList.members.map(m => {
+        allMembers = memberList.members;
+        allClientUrls = allMembers.map(m => {
           const url = m.clientURLs && m.clientURLs[0];
           return url || null;
         }).filter(Boolean);
@@ -511,6 +604,36 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
 
   if (allClientUrls.length === 0) {
     console.warn("[ETCD] Could not retrieve member list — cluster join may be incomplete.");
+  }
+
+  // Update local cluster config with the new member for consistent restarts
+  // Build the initialCluster string from all members' peer URLs.
+  // This is what the joining node passes as --initial-cluster to its etcd.
+  // IMPORTANT: After `member add --learner`, the member list may have an empty
+  // name for the learner (it's populated only after the member actually starts).
+  // Use the known nodeName as a fallback for the member matching our peer URL.
+  const joiningPeerUrl = `http://${nodeIp}:2380`;
+  const initialCluster = allMembers.length > 0
+    ? allMembers
+        .filter(m => m.peerURLs?.[0])
+        .map(m => {
+          const name = m.name || (m.peerURLs?.[0] === joiningPeerUrl ? nodeName : null);
+          return name ? `${name}=${m.peerURLs[0]}` : null;
+        })
+        .filter(Boolean)
+        .join(',') || null
+    : null;
+
+  if (allMembers.length > 0) {
+    const cc = readClusterConfig();
+    writeClusterConfig({
+      clusterToken: cc?.clusterToken || 'core-docker-cluster',
+      members: allMembers.map(m => ({
+        name: m.name || (m.peerURLs?.[0] === joiningPeerUrl ? nodeName : `member-${m.ID}`),
+        ip: (m.peerURLs?.[0] || '').replace(/^http:\/\//, '').replace(/:2380$/, '') || nodeIp,
+      })),
+      keepalivedPassword: cc?.keepalivedPassword,
+    });
   }
 
   const clusterConfig = readClusterConfig();
@@ -528,7 +651,7 @@ export const addEtcdMember = async (nodeName, nodeIp) => {
 
   return {
     memberName: nodeName,
-    initialCluster: null,
+    initialCluster,
     initialClusterState: "existing",
     allClientUrls,
     clusterToken: clusterConfig ? clusterConfig.clusterToken : undefined,
@@ -601,6 +724,7 @@ export const migrateToCluster = async (clusterInfo) => {
     '--initial-cluster', initialCluster,
     '--initial-cluster-state', initialClusterState,
     '--initial-cluster-token', clusterInfo.clusterToken || 'core-docker-cluster',
+    '--max-learners', '5',
     '--data-dir', '/etcd-data',
     '--logger', 'zap',
     '--log-outputs', 'stderr',
@@ -665,4 +789,91 @@ export const migrateToCluster = async (clusterInfo) => {
 
   console.log(`[ETCD] Migration complete. Cluster members: ${memberIps.map(m => m.name).join(', ')}`);
   return true;
+};
+
+/**
+ * Promote a learner member to a full voting member.
+ * Should be called AFTER the learner's etcd has started in cluster mode and
+ * caught up with the Raft log. The promote will fail (and should be retried)
+ * if the learner hasn't finished syncing yet.
+ *
+ * @param {string} memberName - Name of the learner to promote
+ * @returns {Promise<boolean>}
+ */
+export const promoteEtcdMember = async (memberName) => {
+  const authArgs = getAuthArgs();
+  const container = docker.getContainer(CONTAINER_NAME);
+
+  // Get member info using the simple text format which uses hex IDs.
+  // JSON format loses precision for uint64 member IDs in JavaScript.
+  // Text format per line: <hex-id>, <status>, <name>, <peer-url>, <client-url>, <is-learner>
+  let memberHexId = null;
+  let isLearner = false;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const listCmd = [
+      'etcdctl', '--endpoints=127.0.0.1:2379', '--command-timeout=15s',
+      ...authArgs, 'member', 'list',
+    ];
+    const { success, output } = await execWithOutput(container, listCmd, 20000);
+    if (success && output) {
+      for (const line of output.trim().split('\n')) {
+        const cols = line.split(', ');
+        if (cols.length >= 6 && cols[2] === memberName) {
+          memberHexId = cols[0];
+          isLearner = cols[5] === 'true';
+          if (cols[4] && cols[4] !== '<none>' && cols[4].startsWith('http')) {
+            // Learner has connected — ready to promote
+            console.log(`[ETCD] Learner ${memberName} connected (clientURLs: ${cols[4]}), ready to promote.`);
+            attempt = 99;
+            break;
+          }
+          console.log(`[ETCD] Learner ${memberName} not yet connected (attempt ${attempt + 1}), waiting...`);
+        }
+      }
+    }
+    if (attempt === 99) break;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  if (!memberHexId) {
+    throw new Error(`Member "${memberName}" not found in cluster`);
+  }
+
+  if (!isLearner) {
+    console.log(`[ETCD] ${memberName} is already a voting member, skipping promote.`);
+    return true;
+  }
+
+  console.log(`[ETCD] Promoting learner ${memberName} (${memberHexId}) to voting member...`);
+  const promoteCmd = [
+    'etcdctl', '--endpoints=127.0.0.1:2379', '--command-timeout=30s',
+    ...authArgs, 'member', 'promote', memberHexId,
+  ];
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const result = await execWithOutput(container, promoteCmd, 30000);
+      if (result.success) {
+        console.log(`[ETCD] ${memberName} promoted to voting member.`);
+        return true;
+      }
+
+      // Failed — learner may not have caught up yet
+      const cleanErr = (result.output + '\n' + (result.stderr || '')).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+      if (cleanErr.includes('too slow to catch up') || cleanErr.includes('not ready')) {
+        console.log(`[ETCD] Learner ${memberName} not yet caught up (attempt ${attempt + 1}), retrying in 3s...`);
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+
+      console.warn(`[ETCD] Promote attempt ${attempt + 1} failed: ${cleanErr}`);
+      await new Promise(r => setTimeout(r, 3000));
+    } catch (e) {
+      console.warn(`[ETCD] Promote attempt ${attempt + 1} error: ${e.message}`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+
+  throw new Error(`Failed to promote learner ${memberName} after 10 attempts`);
 };

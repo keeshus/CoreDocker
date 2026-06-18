@@ -36,7 +36,7 @@ export async function api(nodeKey, path, options = {}) {
   }
 
   // Node's global fetch() doesn't support https.Agent — use node:https directly
-  const { method = 'GET', body } = options;
+  const { method = 'GET', body, timeout = 60000 } = options;
   const result = await new Promise((resolve, reject) => {
     const req = https.request(url, { method, headers, rejectUnauthorized: false }, (res) => {
       let raw = '';
@@ -60,7 +60,7 @@ export async function api(nodeKey, path, options = {}) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.setTimeout(timeout, () => { req.destroy(); reject(new Error('Request timeout')); });
     if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
     req.end();
   });
