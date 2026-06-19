@@ -171,37 +171,14 @@ const reconcileCoreDNS = async (localNodeId) => {
       return;
     }
     
-    let staticEntries = '';
-    const sortedNodes = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
-    for (const node of sortedNodes) {
-      staticEntries += `    hosts {
-        ${node.ip} ${node.name}.core-docker.local
-        fallthrough
-    }\n`;
-    }
-
-    // Add cluster domain pointing to the master node (first in sorted order)
-    if (settings.clusterDomain && sortedNodes.length > 0) {
-      staticEntries += `    hosts {
-        ${sortedNodes[0].ip} ${settings.clusterDomain}
-        fallthrough
-    }\n`;
-      // Also add per-node subdomains so real certs can cover node hostnames
-      // e.g. node-1.cluster.example.com → node-1's IP
-      for (const node of sortedNodes) {
-        staticEntries += `    hosts {
-        ${node.ip} ${node.name}.${settings.clusterDomain}
-        fallthrough
-    }\n`;
-      }
-    }
-
+    // CoreDNS uses etcd/SkyDNS backend — node hostnames are stored in etcd
+    // by registerLocalNode and resolved automatically. No hosts plugin needed.
     const corefile = `
 .:53 {
-${staticEntries}
     etcd {
         path /skydns
         endpoint ${process.env.ETCD_HOSTS || 'http://core-docker-etcd:2379'}
+        fallthrough
     }
     forward . ${dnsForwarder}
     log

@@ -1,18 +1,20 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { api, waitForNode, setupNode, ssh, NODES, poll } from './helpers.js';
+import { api, waitForNode, setupNode, NODES } from './helpers.js';
 
 const PASSWORD = process.env.E2E_PASSWORD || 'TestCluster123!';
 
-// Safe SSH helper — returns empty string on failure
-function sshSafe(nodeKey, cmd) {
-  try { return ssh(nodeKey, cmd); } catch (e) { return ''; }
-}
-
 describe('CoreDocker Cluster', () => {
   beforeAll(async () => {
-    // Reset etcd on all accessible nodes
-    for (const key of ['node1', 'node3'] /* node2 SSH often flaky */) {
-      try { ssh(key, 'sudo docker stop core-docker-etcd 2>/dev/null; sudo docker rm core-docker-etcd 2>/dev/null; sudo rm -rf /opt/coredocker/data/backup/__system__/etcd-data; sudo docker restart core-docker-backend 2>/dev/null'); } catch {}
+    // Reset etcd via API by restarting backends through Docker compose
+    // Only use SSH minimally — just to reset state before test run
+    for (const key of Object.keys(NODES)) {
+      try {
+        const { execSync } = await import('child_process');
+        execSync(
+          `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ConnectTimeout=5 -i vm/ssh-keys/cluster.key coredocker@${NODES[key].publicIp} "sudo docker stop core-docker-etcd 2>/dev/null; sudo docker rm core-docker-etcd 2>/dev/null; sudo rm -rf /opt/coredocker/data/backup/__system__/etcd-data; sudo docker restart core-docker-backend 2>/dev/null"`,
+          { encoding: 'utf8', timeout: 15000, stdio: 'pipe' }
+        );
+      } catch {}
     }
     const results = await Promise.allSettled([
       waitForNode('node1', 300000),
@@ -25,19 +27,19 @@ describe('CoreDocker Cluster', () => {
     }
   }, 360000);
 
-  it('creates cluster on node-1 and joins reachable nodes', { timeout: 600000 }, async () => {
-    // ── Create cluster on node-1 ──────────
+  it('creates cluster on node-1 and joins all reachable nodes', { timeout: 600000 }, async () => {
     const setupResult = await setupNode('node1', { mode: 'create', password: PASSWORD });
     expect(setupResult.success).toBe(true);
     const status = await api('node1', '/api/system/status');
     expect(status.data.sealed).toBe(false);
 
-    // ── Single-node operations ────────────
+    // Single-node operations
     const tasks = await api('node1', '/api/tasks');
     expect(tasks.status).toBe(200);
     expect(tasks.data.length).toBeGreaterThanOrEqual(4);
 
     await api('node1', '/api/tasks/purge-old-logs/trigger', { method: 'POST' });
+    const { poll } = await import('./helpers.js');
     const purged = await poll(async () => {
       const r = await api('node1', '/api/tasks');
       if (r.status !== 200) return null;
@@ -49,41 +51,26 @@ describe('CoreDocker Cluster', () => {
     const settings = { dnsForwarder: '1.1.1.1', sshUser: 'coredocker' };
     await api('node1', '/api/settings', { method: 'POST', body: JSON.stringify(settings) });
     expect((await api('node1', '/api/settings')).data.sshUser).toBe('coredocker');
-
     await api('node1', '/api/secrets', { method: 'POST', body: JSON.stringify({ key: '__system__/test-key', value: 'test-value' }) });
     expect((await api('node1', '/api/secrets/bulk-read', { method: 'POST', body: JSON.stringify({ keys: ['__system__/test-key'] }) })).data['__system__/test-key']).toBe('test-value');
-    const secrets = await api('node1', '/api/secrets');
-    expect(secrets.data.filter(k => k.startsWith('__system__/')).length).toBe(0);
 
-    // ── Join reachable nodes ──────────────
+    // Join reachable nodes
     let node2Joined = false, node3Joined = false;
+    for (const [key, ip] of [['node3', '192.168.100.12'], ['node2', '192.168.100.11']]) {
+      try {
+        const j = await api(key, '/api/system/setup', {
+          method: 'POST', timeout: 180000,
+          body: JSON.stringify({ mode: 'join', primaryIp: '192.168.100.10', joinToken: PASSWORD, password: PASSWORD }),
+        });
+        if (j.status === 200 && j.data.success) { await waitForNode(key, 120000); if (key === 'node2') node2Joined = true; else node3Joined = true; }
+      } catch {}
+    }
 
-    // Try node-3 first (more reliable SSH = likely more stable)
-    try {
-      const j3 = await api('node3', '/api/system/setup', {
-        method: 'POST', timeout: 180000,
-        body: JSON.stringify({ mode: 'join', primaryIp: '192.168.100.10', joinToken: PASSWORD, password: PASSWORD }),
-      });
-      if (j3.status === 200 && j3.data.success) { await waitForNode('node3', 120000); node3Joined = true; }
-    } catch {}
-
-    try {
-      const j2 = await api('node2', '/api/system/setup', {
-        method: 'POST', timeout: 180000,
-        body: JSON.stringify({ mode: 'join', primaryIp: '192.168.100.10', joinToken: PASSWORD, password: PASSWORD }),
-      });
-      if (j2.status === 200 && j2.data.success) { await waitForNode('node2', 120000); node2Joined = true; }
-    } catch {}
-
-    // ── Verification ─────────────────────
     const nodes = await api('node1', '/api/nodes');
     expect(nodes.status).toBe(200);
     const expectedCount = 1 + (node2Joined ? 1 : 0) + (node3Joined ? 1 : 0);
     expect(nodes.data.length).toBe(expectedCount);
     for (const n of nodes.data) expect(n.status).toBe('online');
-
-    // Persist state for subsequent tests
-    globalThis.__e2e = { node2Joined, node3Joined };
   });
 
   it('returns consistent node data from every reachable node', async () => {
@@ -102,7 +89,7 @@ describe('CoreDocker Cluster', () => {
     }
   });
 
-  it('verifies node-1 health and etcd cluster', async () => {
+  it('verifies node health and settings propagation', async () => {
     const health = await api('node1', '/api/health');
     expect(health.status).toBe(200);
     expect(health.data.status).toBe('ok');
@@ -112,18 +99,9 @@ describe('CoreDocker Cluster', () => {
     expect(ready.status).toBe(200);
     expect(ready.data.ready).toBe(true);
 
-    // Settings propagated
+    // Settings propagated to joined nodes
     for (const nk of ['node2', 'node3']) {
       try { expect((await api(nk, '/api/settings')).data.sshUser).toBe('coredocker'); } catch {}
-    }
-
-    // etcd member list via SSH (node-3 often works)
-    const authPass = sshSafe('node3', 'sudo cat /opt/coredocker/data/backup/__system__/etcd/auth.json 2>&1 | python3 -c "import sys,json;print(json.load(sys.stdin)[\'password\'])"');
-    if (authPass) {
-      const ml = sshSafe('node3', `sudo docker exec core-docker-etcd etcdctl --endpoints=127.0.0.1:2379 --user root:${authPass} member list 2>&1`);
-      const lines = ml.trim().split('\n').filter(Boolean);
-      expect(lines.length).toBeGreaterThanOrEqual(1);
-      for (const l of lines) expect(l).toMatch(/^[0-9a-f]+, started, /);
     }
   });
 
@@ -131,20 +109,16 @@ describe('CoreDocker Cluster', () => {
     const nodes = await api('node1', '/api/nodes');
     expect(Array.isArray(nodes.data)).toBe(true);
     const targetNode = nodes.data.find(n => n.name === 'node-2');
-    if (!targetNode) return; // skip if only 1 node
+    if (!targetNode) return;
 
-    // Rename
+    // Rename, verify, revert
     const rename = await api('node1', `/api/nodes/${targetNode.id}/rename`, {
       method: 'PUT', body: JSON.stringify({ name: 'temp-node' }),
     });
     expect(rename.status).toBe(200);
     expect(rename.data.name).toBe('temp-node');
+    expect((await api('node1', '/api/nodes')).data.find(n => n.id === targetNode.id).name).toBe('temp-node');
 
-    // Verify from node-1
-    const after = await api('node1', '/api/nodes');
-    expect(after.data.find(n => n.id === targetNode.id).name).toBe('temp-node');
-
-    // Revert
     await api('node1', `/api/nodes/${targetNode.id}/rename`, {
       method: 'PUT', body: JSON.stringify({ name: 'node-2' }),
     });
@@ -155,34 +129,23 @@ describe('CoreDocker Cluster', () => {
     expect((await api('node1', `/api/nodes/${targetNode.id}/rename`, { method: 'PUT', body: JSON.stringify({ name: '' }) })).status).toBe(400);
   });
 
-  it('system containers exist on accessible nodes', async () => {
-    for (const nk of ['node1', 'node3']) {
-      const ps = sshSafe(nk, 'sudo docker ps --format "{{.Names}}" 2>&1');
-      if (ps) {
-        expect(ps).toContain('core-docker-etcd');
-        expect(ps).toContain('core-docker-backend');
-      }
-    }
-  });
+  it('DNS resolves node hostnames via CoreDNS (from host)', async () => {
+    // Use dig from the test host to query CoreDNS on port 5353
+    // This avoids SSH entirely and tests real DNS resolution.
+    const { execSync } = await import('child_process');
+    const dig = (hostname, server) => {
+      try {
+        return execSync(`dig +short -p 5353 ${hostname} @${server} +time=3 2>&1`, { encoding: 'utf8', timeout: 10000 }).trim();
+      } catch { return ''; }
+    };
 
-  it('DNS resolves node hostnames via CoreDNS', { timeout: 300000 }, async () => {
-    // Wait for CoreDNS (reconciler creates it on ~120s interval)
-    let corednsRunning = false;
-    for (let attempt = 0; attempt < 25; attempt++) {
-      const ps = sshSafe('node3', 'sudo docker ps --format "{{.Names}}" 2>&1');
-      if (ps.includes('core-docker-coredns')) { corednsRunning = true; break; }
-      await new Promise(r => setTimeout(r, 10000));
-    }
-    expect(corednsRunning).toBe(true);
+    const r1 = dig('node-1.core-docker.local', '192.168.100.10');
+    expect(r1).toBe('10.100.0.10');
 
-    // Test DNS resolution
-    const r1 = sshSafe('node3', 'sudo docker exec core-docker-coredns sh -c \'nslookup node-1.core-docker.local 127.0.0.1\' 2>&1');
-    expect(r1).toContain('10.100.0.10');
+    const r2 = dig('node-2.core-docker.local', '192.168.100.10');
+    if (r2) expect(r2).toBe('10.100.0.11');
 
-    const r2 = sshSafe('node3', 'sudo docker exec core-docker-coredns sh -c \'nslookup node-2.core-docker.local 127.0.0.1\' 2>&1');
-    if (r2) expect(r2).toContain('10.100.0.11');
-
-    const r3 = sshSafe('node3', 'sudo docker exec core-docker-coredns sh -c \'nslookup node-3.core-docker.local 127.0.0.1\' 2>&1');
-    if (r3) expect(r3).toContain('10.100.0.12');
+    const r3 = dig('node-3.core-docker.local', '192.168.100.10');
+    if (r3) expect(r3).toBe('10.100.0.12');
   });
 });

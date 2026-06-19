@@ -97,7 +97,7 @@ export function ssh(nodeKey, command) {
   const node = NODES[nodeKey];
   const keyPath = 'vm/ssh-keys/cluster.key';
   return execSync(
-    `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ${keyPath} coredocker@${node.publicIp} "${command}"`,
+    `ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ConnectTimeout=5 -i ${keyPath} coredocker@${node.publicIp} "${command}"`,
     { encoding: 'utf8', timeout: 15000 }
   ).trim();
 }
