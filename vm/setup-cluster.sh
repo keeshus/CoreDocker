@@ -217,8 +217,8 @@ ethernets:
       addresses:
         - 1.1.1.1
         - 8.8.8.8
-    search:
-      - ${DOMAIN}
+      search:
+        - ${DOMAIN}
   # Backhaul interface (2.5Gb cluster-internal, isolated — no gateway)
   backhaul:
     match:
