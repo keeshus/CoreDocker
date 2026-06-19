@@ -148,4 +148,25 @@ describe('CoreDocker Cluster', () => {
     const r3 = dig('node-3.core-docker.local', '192.168.100.10');
     if (r3) expect(r3).toBe('10.100.0.12');
   });
+
+  it('fetches system containers from remote nodes via proxied API', async () => {
+    // This tests the NodeSettings page flow: selecting a remote node from the
+    // dropdown fetches its containers via the backend proxy.
+    const nodes = await api('node1', '/api/nodes');
+    expect(nodes.status).toBe(200);
+
+    // Find a remote node (node-2 or node-3)
+    const remoteNode = nodes.data.find(n => n.name === 'node-2') || nodes.data.find(n => n.name === 'node-3');
+    if (!remoteNode) return; // skip if only 1 node
+
+    // Call /api/containers?node=<id> on node-1 — this proxies to the remote node
+    const containersResp = await api('node1', `/api/containers?node=${remoteNode.id}`);
+    expect(containersResp.status).toBe(200);
+    expect(Array.isArray(containersResp.data)).toBe(true);
+
+    // Verify system containers are present on the remote node
+    const names = containersResp.data.map(c => c.Names?.[0] || c.name || '').join(' ');
+    expect(names).toContain('core-docker-etcd');
+    expect(names).toContain('core-docker-backend');
+  });
 });
