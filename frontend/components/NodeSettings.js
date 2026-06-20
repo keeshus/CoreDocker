@@ -94,6 +94,7 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
                     <th style={{ padding: '12px 10px' }}>Name</th>
                     <th style={{ padding: '12px 10px' }}>Image</th>
                     <th style={{ padding: '12px 10px' }}>State</th>
+                    <th style={{ padding: '12px 10px' }}>Container ID</th>
                     <th style={{ padding: '12px 10px' }}>CPU %</th>
                     <th style={{ padding: '12px 10px' }}>Memory</th>
                     <th style={{ padding: '12px 10px' }}>Status</th>

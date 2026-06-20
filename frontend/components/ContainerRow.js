@@ -35,8 +35,8 @@ export default function ContainerRow({ container, stats, isExpanded, onToggle, o
             {container.State}
           </span>
         </td>
-        <td style={{ padding: '12px 10px', fontSize: '0.85em', color: '#64748b' }}>
-          {container.current_node || 'master'}
+        <td style={{ padding: '12px 10px', fontFamily: 'monospace', fontSize: '0.85em', color: '#94a3b8' }}>
+          {container.Id.substring(0, 12)}
         </td>
         <td style={{ padding: '12px 10px', fontFamily: 'monospace' }}>
           {container.State === 'running' ? calculateCPU(stats?.cpu) : '-'}
