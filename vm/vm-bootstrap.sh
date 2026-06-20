@@ -49,6 +49,23 @@ start_coredocker() {
 log "=== CoreDocker VM Bootstrap ==="
 log "Node: $NODE_NAME"
 install_docker
+
+# Relax SSH rate limits — the default Ubuntu cloud image has very tight
+# MaxAuthTries (3) which locks us out after a few test connections.
+relax_ssh() {
+  local conf=/etc/ssh/sshd_config
+  log "Relaxing SSH rate limits..."
+  sudo sed -i \
+    -e 's/^MaxAuthTries.*/MaxAuthTries 100/' \
+    -e 's/^MaxStartups.*/MaxStartups 100:30:200/' \
+    -e 's/^MaxSessions.*/MaxSessions 100/' \
+    "$conf" 2>/dev/null || true
+  sudo sed -i 's/^#\?MaxStartups.*/MaxStartups 100:30:200/' "$conf" 2>/dev/null || true
+  sudo systemctl restart sshd 2>/dev/null || sudo service ssh restart 2>/dev/null || true
+  log "SSH rate limits relaxed."
+}
+relax_ssh
+
 start_coredocker
 
 log "=== Bootstrap complete ==="
