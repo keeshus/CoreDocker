@@ -11,7 +11,7 @@ vi.stubGlobal('setTimeout', (fn, ms) => {
 // Create a mock Docker exec stream with data + end events
 function makeExecStream(data) {
   const stream = new EventEmitter();
-  setImmediate(() => {
+  process.nextTick(() => {
     stream.emit('data', data);
     stream.emit('end');
   });
