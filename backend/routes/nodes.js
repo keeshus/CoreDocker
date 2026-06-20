@@ -5,6 +5,62 @@ import { logEvent } from '../services/logger.js';
 const router = express.Router();
 const DNS_SAFE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
+// Returns etcd cluster member status (learner/voting) merged with node info.
+// Each member lists: name, peerUrl, clientUrl, isLearner, id (hex)
+router.get('/etcd-status', async (req, res) => {
+  try {
+    const nodes = await getNodes();
+    const { execSync } = await import('child_process');
+    let members = [];
+    try {
+      const { readFileSync } = await import('fs');
+      const authPath = '/mnt/backup/__system__/etcd/auth.json';
+      let authArgs = '';
+      try {
+        const auth = JSON.parse(readFileSync(authPath, 'utf8'));
+        if (auth.username && auth.password) authArgs = `--user ${auth.username}:${auth.password}`;
+      } catch {}
+      const out = execSync(
+        `docker exec core-docker-etcd etcdctl --endpoints=127.0.0.1:2379 ${authArgs} member list 2>&1`,
+        { encoding: 'utf8', timeout: 10000 }
+      );
+      for (const line of out.trim().split('\n')) {
+        const cols = line.split(', ');
+        if (cols.length >= 6) {
+          members.push({
+            id: cols[0],
+            status: cols[1],
+            name: cols[2],
+            peerUrl: cols[3],
+            clientUrl: cols[4],
+            isLearner: cols[5] === 'true',
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[Nodes] Failed to get etcd member list:', e.message);
+    }
+
+    // Merge etcd member status into each known node
+    const enriched = nodes.map(node => {
+      const member = members.find(m => m.name === node.name);
+      return {
+        ...node,
+        etcd: member ? {
+          isLearner: member.isLearner,
+          status: member.status,
+          id: member.id,
+        } : { isLearner: null, status: 'unknown', id: null },
+        allVoting: members.length > 0 && members.every(m => !m.isLearner),
+      };
+    });
+
+    res.json({ nodes: enriched, members, allVoting: members.every(m => !m.isLearner) });
+  } catch (error) {
+    res.status(500).json({ error: error.message, code: 'ETCD_STATUS_FAILED' });
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
     const nodes = await getNodes();

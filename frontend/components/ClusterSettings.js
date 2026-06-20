@@ -12,6 +12,7 @@ export default function ClusterSettings() {
 
   // Cluster Nodes State
   const [nodes, setNodes] = useState([]);
+  const [etcdStatus, setEtcdStatus] = useState({ nodes: [], members: [], allVoting: false });
   const [loadingNodes, setLoadingNodes] = useState(true);
 
   // Security Form State
@@ -28,6 +29,13 @@ export default function ClusterSettings() {
       console.error(e);
     } finally {
       setLoadingNodes(false);
+    }
+    try {
+      const res = await fetch('/api/nodes/etcd-status');
+      const data = await res.json();
+      if (data && data.nodes) setEtcdStatus(data);
+    } catch (e) {
+      console.error('Failed to fetch etcd status:', e);
     }
   };
 
@@ -376,16 +384,22 @@ export default function ClusterSettings() {
               <th style={{ padding: '12px 10px' }}>Name</th>
               <th style={{ padding: '12px 10px' }}>IP Address</th>
               <th style={{ padding: '12px 10px' }}>Status</th>
+              <th style={{ padding: '12px 10px' }}>etcd</th>
+              <th style={{ padding: '12px 10px' }}>Services</th>
               <th style={{ padding: '12px 10px' }}>Security</th>
               <th style={{ padding: '12px 10px', textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loadingNodes ? (
-              <tr><td colSpan="5" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>Loading nodes...</td></tr>
+              <tr><td colSpan="7" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>Loading nodes...</td></tr>
             ) : nodes.length === 0 ? (
-              <tr><td colSpan="5" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No nodes registered.</td></tr>
-            ) : nodes.map(node => (
+              <tr><td colSpan="7" style={{ padding: '15px 10px', textAlign: 'center', color: '#64748b' }}>No nodes registered.</td></tr>
+            ) : nodes.map(node => {
+              const etcdInfo = etcdStatus.nodes.find(n => n.id === node.id)?.etcd || {};
+              const isLearner = etcdInfo.isLearner;
+              const allVoting = etcdStatus.allVoting;
+              return (
               <tr key={node.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                 <td style={{ padding: '15px 10px', fontWeight: 'bold', color: '#1e293b' }}>
                   {renamingNode === node.id ? (
@@ -409,6 +423,25 @@ export default function ClusterSettings() {
                     color: node.status === 'online' ? '#059669' : '#dc2626'
                   }}>
                     {node.status.toUpperCase()}
+                  </span>
+                </td>
+                <td style={{ padding: '15px 10px' }}>
+                  {isLearner === null ? (
+                    <span style={{ color: '#94a3b8', fontSize: '0.85em' }}>—</span>
+                  ) : isLearner ? (
+                    <span style={{ color: '#d97706', fontSize: '0.85em', fontWeight: 'bold' }}>Learner</span>
+                  ) : (
+                    <span style={{ color: '#059669', fontSize: '0.85em', fontWeight: 'bold' }}>Voting</span>
+                  )}
+                </td>
+                <td style={{ padding: '15px 10px' }}>
+                  <span style={{
+                    display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%',
+                    background: isLearner ? '#fbbf24' : '#34d399',
+                    marginRight: '6px', verticalAlign: 'middle'
+                  }} />
+                  <span style={{ fontSize: '0.85em', color: '#64748b' }}>
+                    {allVoting ? 'All Healthy' : 'Pending...'}
                   </span>
                 </td>
                 <td style={{ padding: '15px 10px' }}>
