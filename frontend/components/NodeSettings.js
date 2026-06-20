@@ -8,6 +8,7 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
   const [expandedContainer, setExpandedContainer] = useState(null);
   const [remoteContainers, setRemoteContainers] = useState([]);
   const [loadingContainers, setLoadingContainers] = useState(false);
+  const [containerError, setContainerError] = useState('');
 
   useEffect(() => {
     fetch('/api/nodes')
@@ -31,11 +32,16 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
     if (!selectedNode) return;
 
-    // For the local node, use the prop data (already available)
-    // For remote nodes, fetch from the proxied API
     setLoadingContainers(true);
+    setContainerError('');
     fetch(`/api/containers?node=${selectedNodeId}`)
-      .then(res => res.json())
+      .then(async res => {
+        if (!res.ok) {
+          const err = await res.text().catch(() => 'unknown');
+          throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+        }
+        return res.json();
+      })
       .then(data => {
         const system = data.filter(c =>
           (c.Names?.[0] || '').startsWith('/core-docker-')
@@ -43,13 +49,20 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
         setRemoteContainers(system);
         setLoadingContainers(false);
       })
-      .catch(() => setLoadingContainers(false));
+      .catch(e => {
+        setContainerError(e.message);
+        setRemoteContainers([]);
+        setLoadingContainers(false);
+      });
   }, [selectedNodeId, nodes]);
 
   if (loadingNodes) return <div>Loading nodes...</div>;
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
-  const containers = remoteContainers.length > 0 ? remoteContainers : systemContainers;
+  // Only show remote containers when fetched; fall back to props for the local node
+  const containers = remoteContainers.length > 0 || !selectedNodeId
+    ? remoteContainers
+    : systemContainers;
 
   return (
     <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -84,6 +97,12 @@ export default function NodeSettings({ systemContainers = [], stats = {} }) {
           <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
             <h3 style={{ marginTop: 0 }}>System Containers on {selectedNode?.name}</h3>
             <p style={{ color: '#64748b', fontSize: '0.9em' }}>Monitor core application containers running on this node.</p>
+
+            {containerError && (
+              <p style={{ color: '#dc2626', background: '#fef2f2', padding: '10px', borderRadius: '4px', marginTop: '10px' }}>
+                ⚠ {containerError}
+              </p>
+            )}
 
             {loadingContainers ? (
               <p style={{ color: '#94a3b8', marginTop: '15px' }}>Loading containers...</p>
