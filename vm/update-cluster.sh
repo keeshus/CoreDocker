@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SSH_KEY="$SCRIPT_DIR/ssh-keys/cluster.key"
-SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=5 -i $SSH_KEY"
+SSH_OPTS="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ConnectTimeout=5 -i $SSH_KEY"
 SSH_USER="coredocker"
 REPO_DIR="/opt/coredocker"
 
