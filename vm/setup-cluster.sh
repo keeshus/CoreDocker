@@ -296,15 +296,6 @@ create_vm() {
   if [ ! -f "$disk_file" ]; then
     log "Creating disk for $node_name..."
     qemu-img create -f qcow2 -b "$CLOUD_IMAGE_FILE" -F qcow2 "$disk_file" "${VM_DISK_GB}G"
-    # Inject SSH key directly into the disk as a failsafe — some cloud-init
-    # runs (especially on recreate) miss the ssh_authorized_keys directive.
-    if command -v virt-customize &>/dev/null; then
-      log "Injecting SSH key into $node_name disk..."
-      virt-customize -a "$disk_file" \
-        --ssh-inject root:file:"$SSH_KEY_PUB" \
-        --run-command "mkdir -p /home/coredocker/.ssh; cp /root/.ssh/authorized_keys /home/coredocker/.ssh/authorized_keys; chown -R coredocker:coredocker /home/coredocker/.ssh; chmod 700 /home/coredocker/.ssh; chmod 600 /home/coredocker/.ssh/authorized_keys" \
-        --selinux-relabel 2>&1 | grep -v "libguestfs: warning\|random seed" || true
-    fi
   fi
 
   log "Launching $node_name (public=$node_ip, backhaul=$backhaul_mac)..."
