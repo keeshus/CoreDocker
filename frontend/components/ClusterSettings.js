@@ -480,7 +480,8 @@ export default function ClusterSettings() {
                   </button>
                 </td>
               </tr>
-            ))}
+            );
+          })}
           </tbody>
         </table>
       </div>
