@@ -301,8 +301,9 @@ create_vm() {
     if command -v virt-customize &>/dev/null; then
       log "Injecting SSH key into $node_name disk..."
       virt-customize -a "$disk_file" \
-        --ssh-inject coredocker:file:"$SSH_KEY_PUB" \
-        --selinux-relabel 2>&1 | grep -v "libguestfs: warning" || true
+        --ssh-inject root:file:"$SSH_KEY_PUB" \
+        --run-command "mkdir -p /home/coredocker/.ssh; cp /root/.ssh/authorized_keys /home/coredocker/.ssh/authorized_keys; chown -R coredocker:coredocker /home/coredocker/.ssh; chmod 700 /home/coredocker/.ssh; chmod 600 /home/coredocker/.ssh/authorized_keys" \
+        --selinux-relabel 2>&1 | grep -v "libguestfs: warning\|random seed" || true
     fi
   fi
 
@@ -347,10 +348,10 @@ wait_for_vm() {
 # 8. Wait for CoreDocker health
 # ════════════════════════════════════════════════════════
 wait_for_health() {
-  local node_ip="$1" timeout=600 interval=10 elapsed=0
+  local node_ip="$1" timeout=900 interval=10 elapsed=0
   log "Waiting for CoreDocker health on $node_ip..."
   while [ "$elapsed" -lt "$timeout" ]; do
-    if curl -sf "http://${node_ip}/api/health" >/dev/null 2>&1; then
+    if curl -sfk "https://${node_ip}/api/health" >/dev/null 2>&1; then
       log "CoreDocker healthy on $node_ip (${elapsed}s)"
       return 0
     fi
