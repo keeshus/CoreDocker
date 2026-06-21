@@ -41,7 +41,22 @@ router.get('/etcd-status', async (req, res) => {
       console.warn('[Nodes] Failed to get etcd member list:', e.message);
     }
 
-    // Merge etcd member status into each known node
+    // Check actual service health (system containers running)
+    let runningContainers = [];
+    try {
+      const out = execSync('docker ps --format "{{.Names}}" 2>&1', { encoding: 'utf8', timeout: 5000 });
+      runningContainers = out.trim().split('\n').filter(Boolean);
+    } catch (e) {
+      console.warn('[Nodes] Failed to list Docker containers:', e.message);
+    }
+    const systemServices = ['core-docker-etcd', 'core-docker-backend', 'core-docker-proxy', 'core-docker-coredns'];
+    const healthSummary = {};
+    for (const svc of systemServices) {
+      healthSummary[svc] = runningContainers.includes(svc);
+    }
+    const allServicesHealthy = systemServices.every(s => healthSummary[s]);
+
+    // Merge etcd member status and service health into each known node
     const enriched = nodes.map(node => {
       const member = members.find(m => m.name === node.name);
       return {
@@ -51,11 +66,18 @@ router.get('/etcd-status', async (req, res) => {
           status: member.status,
           id: member.id,
         } : { isLearner: null, status: 'unknown', id: null },
+        services: healthSummary,
         allVoting: members.length > 0 && members.every(m => !m.isLearner),
       };
     });
 
-    res.json({ nodes: enriched, members, allVoting: members.every(m => !m.isLearner) });
+    res.json({
+      nodes: enriched,
+      members,
+      allVoting: members.every(m => !m.isLearner),
+      allServicesHealthy,
+      systemServices,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message, code: 'ETCD_STATUS_FAILED' });
   }

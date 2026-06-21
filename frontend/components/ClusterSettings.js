@@ -437,12 +437,17 @@ export default function ClusterSettings() {
                 <td style={{ padding: '15px 10px' }}>
                   <span style={{
                     display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%',
-                    background: isLearner ? '#fbbf24' : '#34d399',
+                    background: etcdStatus.allServicesHealthy ? '#34d399' : '#ef4444',
                     marginRight: '6px', verticalAlign: 'middle'
                   }} />
                   <span style={{ fontSize: '0.85em', color: '#64748b' }}>
-                    {allVoting ? 'All Healthy' : 'Pending...'}
+                    {etcdStatus.allServicesHealthy ? 'All Healthy' : 'Degraded'}
                   </span>
+                  {!etcdStatus.allServicesHealthy && etcdStatus.systemServices && (
+                    <div style={{ fontSize: '0.75em', color: '#dc2626', marginTop: '4px' }}>
+                      {etcdStatus.systemServices.filter(s => !node.services?.[s]).join(', ')} down
+                    </div>
+                  )}
                 </td>
                 <td style={{ padding: '15px 10px' }}>
                   {!node.sealed ? (
