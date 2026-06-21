@@ -1,6 +1,7 @@
 import express from 'express';
 import { getNodes, saveNode, deleteNode } from '../services/db.js';
 import { logEvent } from '../services/logger.js';
+import docker from '../services/docker.js';
 
 const router = express.Router();
 const DNS_SAFE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -41,11 +42,11 @@ router.get('/etcd-status', async (req, res) => {
       console.warn('[Nodes] Failed to get etcd member list:', e.message);
     }
 
-    // Check actual service health (system containers running)
+    // Check actual service health (running system containers via Dockerode)
     let runningContainers = [];
     try {
-      const out = execSync('docker ps --format "{{.Names}}" 2>&1', { encoding: 'utf8', timeout: 5000 });
-      runningContainers = out.trim().split('\n').filter(Boolean);
+      const containers = await docker.listContainers({ all: false });
+      runningContainers = containers.map(c => (c.Names?.[0] || '').replace(/^\//, ''));
     } catch (e) {
       console.warn('[Nodes] Failed to list Docker containers:', e.message);
     }
