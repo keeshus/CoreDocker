@@ -21,12 +21,16 @@ export default function ContainerLogs({ containerId }) {
   }, [logs]);
 
   return (
-    <div 
+    <div
       ref={scrollRef}
-      style={{ 
-        background: '#0f172a', color: '#f1f5f9', padding: '10px', borderRadius: '4px', 
-        fontFamily: 'monospace', fontSize: '0.8em', height: '250px', overflowY: 'auto',
-        whiteSpace: 'pre-wrap', border: '1px solid #334155'
+      style={{
+        background: 'var(--md-inverse-surface)',
+        color: 'var(--md-inverse-on-surface)',
+        padding: '12px', borderRadius: 'var(--md-radius-md)',
+        fontFamily: 'var(--md-font-mono)', fontSize: '0.8rem',
+        height: '250px', overflowY: 'auto',
+        whiteSpace: 'pre-wrap',
+        border: '1px solid var(--md-outline-variant)',
       }}
     >
       {logs.length === 0 ? 'Loading logs...' : logs.join('')}

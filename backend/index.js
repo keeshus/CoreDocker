@@ -239,6 +239,7 @@ const bootCluster = async (nodeId) => {
           await runMigrations(migrations);
           console.log('[Cluster] Migrations complete.');
           startScheduler();
+          await reconcileContainers(nodeId);
           startReconciler(nodeId);
           setTimeout(() => startOrchestrator(nodeId), 60000);
         } catch (e) {

@@ -14,13 +14,14 @@ export default function TasksTab() {
   const [nodes, setNodes] = useState([]);
   const [selectedNode, setSelectedNode] = useState('');
   const selectedNodeRef = useRef('');
-  // Keep ref in sync with state so intervals always read the latest value
   useEffect(() => { selectedNodeRef.current = selectedNode; }, [selectedNode]);
   const [loadingNodes, setLoadingNodes] = useState(true);
 
-  const fetchTasks = async () => {
+  const fetchTasks = async (nodeId) => {
     try {
-      const res = await fetch('/api/tasks');
+      const nid = nodeId || selectedNodeRef.current;
+      const url = nid ? `/api/tasks?node=${nid}` : '/api/tasks';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setTasks(data);
@@ -47,7 +48,6 @@ export default function TasksTab() {
       .catch(() => setLoadingNodes(false));
 
     const taskInterval = setInterval(fetchTasks, 5000);
-    // Also auto-refresh expanded task logs every 10s
     const logInterval = setInterval(() => {
       if (expandedRef.current) {
         loadTaskLogs(expandedRef.current, true);
@@ -82,7 +82,6 @@ export default function TasksTab() {
         method: 'POST'
       });
       fetchTasks();
-      // Refresh logs after task completes (retry a few times to catch the write)
       [2000, 5000].forEach(delay => {
         setTimeout(() => {
           if (expandedRef.current === taskId) {
@@ -93,7 +92,6 @@ export default function TasksTab() {
     } catch (e) {
       console.error('Failed to trigger task:', e);
     }
-    // Re-enable after 3 seconds
     setTimeout(() => {
       setTriggerCooldown(prev => ({ ...prev, [taskId]: false }));
     }, 3000);
@@ -105,8 +103,6 @@ export default function TasksTab() {
     const currentLogs = taskLogsRef.current;
     if (!force && currentLogs[taskId]) return;
     const node = selectedNodeRef.current;
-    // Preserve previously loaded pages during force-refresh so Load More
-    // items don't disappear when the 10s auto-refresh fires
     const prevExtra = force && currentLogs[taskId]?.files
       ? currentLogs[taskId].files.slice(LOGS_PER_PAGE) : [];
     setLoadingLogs(prev => ({ ...prev, [taskId]: true }));
@@ -146,7 +142,6 @@ export default function TasksTab() {
       const res = await fetch(`/api/tasks/${taskId}/logs?page=${nextPage}&limit=${LOGS_PER_PAGE}${nodeParam}`);
       if (res.ok) {
         const data = await res.json();
-        // Handle both paginated response {files,total,page,totalPages} and legacy flat array
         const newFiles = data.files || (Array.isArray(data) ? data : []);
         const newTotal = data.total || newFiles.length;
         const newTotalPages = data.totalPages || 1;
@@ -202,105 +197,180 @@ export default function TasksTab() {
     }
   };
 
-  if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading tasks...</div>;
+  if (loading) return (
+    <div style={{
+      padding: '20px', fontFamily: 'var(--md-font)',
+      color: 'var(--md-on-surface-variant)',
+    }}>
+      Loading tasks...
+    </div>
+  );
 
   return (
     <section>
-      <h2 style={{ fontSize: '1.5em' }}>Scheduler & Tasks</h2>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: '20px',
+      }}>
+        <h2 style={{
+          fontSize: '1.35rem', fontWeight: 600, color: 'var(--md-on-surface)',
+          margin: 0, letterSpacing: '-0.01em',
+        }}>
+          Scheduler & Tasks
+        </h2>
 
-      <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <label style={{ fontWeight: 'bold', color: '#475569' }}>View node:</label>
-        <select
-          value={selectedNode}
-          onChange={e => {
-            const val = e.target.value;
-            setSelectedNode(val);
-            selectedNodeRef.current = val;
-            setTaskLogs({});
-            setLogContent({});
-            // Reload logs for currently expanded task
-            if (expandedRef.current) {
-              setTimeout(() => loadTaskLogs(expandedRef.current, true), 0);
-            }
-          }}
-          style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'white', fontSize: '0.9em' }}
-        >
-          <option value="">All Nodes</option>
-          {nodes.map(node => (
-            <option key={node.id} value={node.id}>{node.name} ({node.ip})</option>
-          ))}
-        </select>
-        {loadingNodes && <span style={{ color: '#94a3b8', fontSize: '0.85em' }}>Loading nodes...</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <label style={{
+            fontWeight: 500, color: 'var(--md-on-surface-variant)',
+            fontSize: '0.875rem',
+          }}>
+            View node:
+          </label>
+          <select
+            value={selectedNode}
+            onChange={e => {
+              const val = e.target.value;
+              setSelectedNode(val);
+              selectedNodeRef.current = val;
+              setTaskLogs({});
+              setLogContent({});
+              setLoading(true);
+              fetchTasks(val);
+              if (expandedRef.current) {
+                setTimeout(() => loadTaskLogs(expandedRef.current, true), 0);
+              }
+            }}
+            style={{
+              padding: '8px 36px 8px 12px',
+              border: '1px solid var(--md-outline)',
+              borderRadius: 'var(--md-radius-full)',
+              background: 'var(--md-surface)',
+              color: 'var(--md-on-surface)',
+              fontSize: '0.875rem',
+              fontFamily: 'var(--md-font)',
+              cursor: 'pointer',
+              appearance: 'none',
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' height='20' viewBox='0 -960 960 960' width='20' fill='%2344474f'%3E%3Cpath d='M480-344 240-584l43-43 197 197 197-197 43 43-240 240Z'/%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 8px center',
+            }}
+          >
+            <option value="">All Nodes</option>
+            {nodes.map(node => (
+              <option key={node.id} value={node.id}>{node.name} ({node.ip})</option>
+            ))}
+          </select>
+          {loadingNodes && (
+            <span style={{ color: 'var(--md-on-surface-variant)', fontSize: '0.85rem' }}>
+              Loading...
+            </span>
+          )}
+        </div>
       </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+
+      <table style={{
+        width: '100%', borderCollapse: 'collapse',
+        background: 'var(--md-surface-container)',
+        borderRadius: 'var(--md-radius-lg)',
+        overflow: 'hidden',
+        border: '1px solid var(--md-outline-variant)',
+      }}>
         <thead>
-          <tr style={{ textAlign: 'left', borderBottom: '2px solid #e2e8f0', color: '#64748b', fontSize: '0.9em' }}>
-            <th style={{ padding: '12px 10px' }}>Task Name</th>
-            <th style={{ padding: '12px 10px' }}>Schedule</th>
-            <th style={{ padding: '12px 10px' }}>Status</th>
-            <th style={{ padding: '12px 10px' }}>Last Run</th>
-            <th style={{ padding: '12px 10px' }}>Node</th>
-            <th style={{ padding: '12px 10px' }}>Next Run</th>
-            <th style={{ padding: '12px 10px', textAlign: 'right' }}>Actions</th>
+          <tr style={{
+            textAlign: 'left',
+            borderBottom: '1px solid var(--md-outline-variant)',
+            color: 'var(--md-on-surface-variant)',
+            fontSize: '0.8rem', fontWeight: 600,
+            background: 'var(--md-surface)',
+          }}>
+            <th style={{ padding: '12px 16px' }}>Task Name</th>
+            <th style={{ padding: '12px 16px' }}>Schedule</th>
+            <th style={{ padding: '12px 16px' }}>Status</th>
+            <th style={{ padding: '12px 16px' }}>Last Run</th>
+            <th style={{ padding: '12px 16px' }}>Node</th>
+            <th style={{ padding: '12px 16px' }}>Next Run</th>
+            <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {tasks.map(task => (
             <React.Fragment key={task.id}>
               <tr style={{
-                borderBottom: '1px solid #f1f5f9',
-                background: task.status === 'running' ? '#f0f9ff' : 'transparent',
-                cursor: 'pointer'
+                borderBottom: '1px solid var(--md-outline-variant)',
+                background: task.status === 'running' ? 'var(--md-primary-container)' : 'transparent',
+                cursor: 'pointer',
+                transition: 'background var(--md-transition)',
               }}
                 onClick={() => handleExpand(task.id)}
               >
-                <td style={{ padding: '15px 10px' }}>
-                  <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{task.name}</div>
+                <td style={{ padding: '14px 16px' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--md-on-surface)', fontSize: '0.9rem' }}>
+                    {expandedTask === task.id ? '▼ ' : '▶ '}{task.name}
+                  </div>
                 </td>
-                <td style={{ padding: '15px 10px', color: '#64748b', fontSize: '0.9em' }}>{task.scheduleDesc}</td>
-                <td style={{ padding: '15px 10px' }}>
+                <td style={{ padding: '14px 16px', color: 'var(--md-on-surface-variant)', fontSize: '0.85rem' }}>
+                  {task.scheduleDesc}
+                </td>
+                <td style={{ padding: '14px 16px' }}>
                   <span style={{
-                    display: 'inline-block',
-                    padding: '4px 8px',
-                    borderRadius: '12px',
-                    fontSize: '0.8em',
-                    fontWeight: 'bold',
-                    background: task.status === 'running' ? '#dbeafe' : task.status === 'failed' ? '#fee2e2' : task.status === 'success' ? '#d1fae5' : '#f1f5f9',
-                    color: task.status === 'running' ? '#2563eb' : task.status === 'failed' ? '#dc2626' : task.status === 'success' ? '#059669' : '#64748b'
+                    display: 'inline-block', padding: '4px 10px',
+                    borderRadius: 'var(--md-radius-full)', fontSize: '0.75rem', fontWeight: 600,
+                    background: task.status === 'running' ? 'var(--md-status-running-bg)'
+                      : task.status === 'failed' ? 'var(--md-status-failed-bg)'
+                      : task.status === 'success' ? 'var(--md-status-success-bg)'
+                      : 'var(--md-status-idle-bg)',
+                    color: task.status === 'running' ? 'var(--md-status-running)'
+                      : task.status === 'failed' ? 'var(--md-status-failed)'
+                      : task.status === 'success' ? 'var(--md-status-success)'
+                      : 'var(--md-status-idle)',
                   }}>
                     {task.status.toUpperCase()}
                   </span>
                   {!task.enabled && (
-                    <span style={{ marginLeft: '8px', fontSize: '0.8em', color: '#ef4444', fontWeight: 'bold' }}>(PAUSED)</span>
+                    <span style={{
+                      marginLeft: '8px', fontSize: '0.75rem',
+                      color: 'var(--md-status-paused)', fontWeight: 600,
+                    }}>
+                      (PAUSED)
+                    </span>
                   )}
                 </td>
-                <td style={{ padding: '15px 10px', color: '#64748b', fontSize: '0.9em' }}>
+                <td style={{ padding: '14px 16px', color: 'var(--md-on-surface-variant)', fontSize: '0.85rem' }}>
                   {task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never'}
                 </td>
-                <td style={{ padding: '15px 10px', fontSize: '0.9em' }}>
+                <td style={{ padding: '14px 16px', fontSize: '0.85rem' }}>
                   {task.lastRunNode ? (
                     <span style={{
-                      display: 'inline-block', padding: '3px 8px', borderRadius: '10px',
-                      background: '#e0e7ff', color: '#3730a3', fontWeight: 'bold', fontSize: '0.85em'
+                      display: 'inline-block', padding: '3px 10px',
+                      borderRadius: 'var(--md-radius-full)',
+                      background: 'var(--md-secondary-container)',
+                      color: 'var(--md-on-secondary-container)',
+                      fontWeight: 600, fontSize: '0.8rem',
                     }}>
                       {task.lastRunNode}
                     </span>
                   ) : (
-                    <span style={{ color: '#94a3b8' }}>—</span>
+                    <span style={{ color: 'var(--md-on-surface-variant)' }}>&mdash;</span>
                   )}
                 </td>
-                <td style={{ padding: '15px 10px', color: '#64748b', fontSize: '0.9em' }}>
+                <td style={{ padding: '14px 16px', color: 'var(--md-on-surface-variant)', fontSize: '0.85rem' }}>
                   {task.nextRun ? new Date(task.nextRun).toLocaleString() : 'N/A'}
                 </td>
-                <td style={{ padding: '15px 10px', textAlign: 'right' }}>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
                     <button
                       onClick={() => triggerTask(task.id)}
                       disabled={task.status === 'running' || !task.enabled || triggerCooldown[task.id]}
                       style={{
-                        background: '#f8fafc', color: (task.status === 'running' || !task.enabled || triggerCooldown[task.id]) ? '#cbd5e1' : '#3b82f6',
-                        border: '1px solid #e2e8f0', padding: '6px 12px', borderRadius: '4px', cursor: (task.status === 'running' || !task.enabled || triggerCooldown[task.id]) ? 'not-allowed' : 'pointer',
-                        fontSize: '0.85em', fontWeight: 'bold'
+                        padding: '6px 14px', borderRadius: 'var(--md-radius-full)',
+                        border: '1px solid var(--md-outline-variant)',
+                        background: 'var(--md-surface)',
+                        color: (task.status === 'running' || !task.enabled || triggerCooldown[task.id])
+                          ? 'var(--md-outline)' : 'var(--md-primary)',
+                        cursor: (task.status === 'running' || !task.enabled || triggerCooldown[task.id])
+                          ? 'not-allowed' : 'pointer',
+                        fontSize: '0.8rem', fontWeight: 600,
+                        fontFamily: 'var(--md-font)',
                       }}
                     >
                       Run Now
@@ -308,9 +378,12 @@ export default function TasksTab() {
                     <button
                       onClick={() => toggleTask(task.id, !task.enabled)}
                       style={{
-                        background: '#f8fafc', color: task.enabled ? '#ef4444' : '#10b981',
-                        border: '1px solid #e2e8f0', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer',
-                        fontSize: '0.85em', fontWeight: 'bold'
+                        padding: '6px 14px', borderRadius: 'var(--md-radius-full)',
+                        border: '1px solid var(--md-outline-variant)',
+                        background: 'var(--md-surface)',
+                        color: task.enabled ? 'var(--md-error)' : 'var(--md-success)',
+                        cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
+                        fontFamily: 'var(--md-font)',
                       }}
                     >
                       {task.enabled ? 'Pause' : 'Resume'}
@@ -320,30 +393,41 @@ export default function TasksTab() {
               </tr>
               {expandedTask === task.id && (
                 <tr>
-                  <td colSpan="7" style={{ padding: '0 10px 15px 10px', background: '#fafafa', borderBottom: '1px solid #e2e8f0' }}>
+                  <td colSpan="7" style={{
+                    padding: '0 16px 16px 16px',
+                    background: 'var(--md-surface)', borderBottom: '1px solid var(--md-outline-variant)',
+                  }}>
                     <div style={{
-                      background: '#1e293b',
-                      color: '#e2e8f0',
-                      fontFamily: 'monospace',
-                      fontSize: '0.85em',
+                      background: 'var(--md-inverse-surface)',
+                      color: 'var(--md-inverse-on-surface)',
+                      fontFamily: 'var(--md-font-mono)',
+                      fontSize: '0.85rem',
                       padding: '12px 16px',
-                      borderRadius: '6px',
+                      borderRadius: 'var(--md-radius-md)',
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-all',
                       maxHeight: '200px',
                       overflowY: 'auto',
-                      marginTop: '10px'
+                      marginTop: '10px',
                     }}>
                       {task.lastOutput || (task.lastRun ? 'Task completed with no output.' : 'Task has not run yet.')}
                     </div>
                     {task.lastExitCode !== undefined && (
-                      <div style={{ marginTop: '6px', fontSize: '0.85em', color: task.lastExitCode === 0 ? '#059669' : '#dc2626' }}>
+                      <div style={{
+                        marginTop: '6px', fontSize: '0.85rem',
+                        color: task.lastExitCode === 0 ? 'var(--md-success)' : 'var(--md-error)',
+                      }}>
                         Exit code: {task.lastExitCode}
                       </div>
                     )}
 
-                    <div style={{ marginTop: '15px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
-                      <h4 style={{ margin: '0 0 8px 0', fontSize: '0.95em', color: '#475569' }}>Run History</h4>
+                    <div style={{ marginTop: '15px', borderTop: '1px solid var(--md-outline-variant)', paddingTop: '10px' }}>
+                      <h4 style={{
+                        margin: '0 0 8px 0', fontSize: '0.95rem',
+                        color: 'var(--md-on-surface-variant)', fontWeight: 600,
+                      }}>
+                        Run History
+                      </h4>
                       {(() => {
                         const logs = taskLogs[task.id];
                         const logFiles = logs?.files || (Array.isArray(logs) ? logs : []);
@@ -351,7 +435,9 @@ export default function TasksTab() {
 
                         return (<>
                       {loadingLogs[task.id] ? (
-                        <div style={{ color: '#94a3b8', fontSize: '0.85em' }}>Loading logs...</div>
+                        <div style={{ color: 'var(--md-on-surface-variant)', fontSize: '0.85rem' }}>
+                          Loading logs...
+                        </div>
                       ) : logFiles.length > 0 ? (
                         <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
                           {logFiles.map(log => (
@@ -360,25 +446,41 @@ export default function TasksTab() {
                                 onClick={() => loadLogContent(task.id, log.filename, log.nodeId)}
                                 style={{
                                   display: 'flex', alignItems: 'center', gap: '12px',
-                                  padding: '6px 8px', cursor: 'pointer', borderRadius: '4px',
-                                  fontSize: '0.85em', color: '#3b82f6', fontWeight: 'bold',
+                                  padding: '6px 8px', cursor: 'pointer', borderRadius: 'var(--md-radius-sm)',
+                                  fontSize: '0.85rem',
+                                  transition: 'background var(--md-transition)',
                                 }}
                               >
-                                <span style={{ color: '#64748b', fontWeight: 'normal' }}>{new Date(log.timestamp).toLocaleString()}</span>
-                                <span style={{ color: logContent[log.filename] ? '#64748b' : '#3b82f6' }}>
+                                <span style={{ color: 'var(--md-on-surface-variant)', fontWeight: 400 }}>
+                                  {new Date(log.timestamp).toLocaleString()}
+                                </span>
+                                <span style={{
+                                  color: logContent[log.filename] ? 'var(--md-on-surface-variant)' : 'var(--md-primary)',
+                                  fontWeight: 600,
+                                }}>
                                   {logContent[log.filename] ? '▼' : '▶'} Exit code: {log.exitCode !== null && log.exitCode !== undefined ? log.exitCode : '?'}
                                 </span>
                                 {log.nodeId && !selectedNode && (
-                                  <span style={{ color: '#6366f1', fontWeight: 'bold', fontSize: '0.85em' }}>[{log.nodeId}]</span>
+                                  <span style={{
+                                    color: 'var(--md-tertiary)', fontWeight: 600, fontSize: '0.85rem',
+                                  }}>
+                                    [{log.nodeId}]
+                                  </span>
                                 )}
-                                <span style={{ color: '#94a3b8', fontWeight: 'normal' }}>({(log.size / 1024).toFixed(1)} KB)</span>
+                                <span style={{ color: 'var(--md-on-surface-variant)', fontWeight: 400 }}>
+                                  ({(log.size / 1024).toFixed(1)} KB)
+                                </span>
                               </div>
                               {logContent[log.filename] && (
                                 <div style={{
-                                  background: '#1e293b', color: '#e2e8f0', fontFamily: 'monospace',
-                                  fontSize: '0.8em', padding: '10px 14px', borderRadius: '4px',
+                                  background: 'var(--md-inverse-surface)',
+                                  color: 'var(--md-inverse-on-surface)',
+                                  fontFamily: 'var(--md-font-mono)',
+                                  fontSize: '0.8rem', padding: '10px 14px',
+                                  borderRadius: 'var(--md-radius-md)',
                                   whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                                  maxHeight: '300px', overflowY: 'auto', margin: '0 8px 8px 8px'
+                                  maxHeight: '300px', overflowY: 'auto',
+                                  margin: '0 8px 8px 8px',
                                 }}>
                                   {logContent[log.filename]}
                                 </div>
@@ -387,27 +489,30 @@ export default function TasksTab() {
                           ))}
                         </div>
                       ) : (
-                        <div style={{ color: '#94a3b8', fontSize: '0.85em' }}>No run logs yet.</div>
+                        <div style={{ color: 'var(--md-on-surface-variant)', fontSize: '0.85rem' }}>
+                          No run logs yet.
+                        </div>
                       )}
 
-                      {logs && logs.totalPages > 1 && (
+                      {hasMore && (
                         <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--md-on-surface-variant)' }}>
                             Showing {logFiles.length} of {logs.total} runs
                           </span>
-                          {logs.page < logs.totalPages && (
-                            <button
-                              onClick={() => loadMoreLogs(task.id)}
-                              disabled={loadingLogs[task.id]}
-                              style={{
-                                padding: '4px 12px', fontSize: '0.8em', cursor: 'pointer',
-                                background: '#f1f5f9', color: '#3b82f6', border: '1px solid #e2e8f0',
-                                borderRadius: '4px', fontWeight: 'bold',
-                              }}
-                            >
-                              {loadingLogs[task.id] ? 'Loading...' : 'Load more'}
-                            </button>
-                          )}
+                          <button
+                            onClick={() => loadMoreLogs(task.id)}
+                            disabled={loadingLogs[task.id]}
+                            style={{
+                              padding: '4px 14px', fontSize: '0.8rem', cursor: 'pointer',
+                              borderRadius: 'var(--md-radius-full)',
+                              background: 'var(--md-surface)',
+                              color: 'var(--md-primary)',
+                              border: '1px solid var(--md-outline-variant)',
+                              fontWeight: 600, fontFamily: 'var(--md-font)',
+                            }}
+                          >
+                            {loadingLogs[task.id] ? 'Loading...' : 'Load more'}
+                          </button>
                         </div>
                       )}
                       </>);

@@ -1,4 +1,5 @@
 import express from 'express';
+import https from 'https';
 import docker from '../services/docker.js';
 import { etcd, saveContainer, deleteContainer, getContainerByName, getLocalNodeConfig, getContainers, getNodes } from '../services/db.js';
 import { ensureContainerNetworks, removeContainerNetworks } from '../services/network-manager.js';
@@ -10,6 +11,37 @@ import { withTimeout } from '../utils/timeout.js';
 import { withContainerLock } from '../utils/locks.js';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs/promises';
+
+function insecureFetch(url, opts = {}) {
+  const method = opts.method || 'GET';
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(u, {
+      method,
+      headers: opts.headers || {},
+      rejectUnauthorized: false,
+      timeout: 60000,
+    }, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          json: async () => JSON.parse(body),
+          text: async () => body,
+        });
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Request timed out: ${method} ${url}`));
+    });
+    req.on('error', (err) => reject(err));
+    if (opts.body) req.write(opts.body);
+    req.end();
+  });
+}
 
 const router = express.Router();
 
@@ -87,7 +119,7 @@ const proxyToNode = async (nodeId, req, res) => {
         options.body = JSON.stringify(req.body);
       }
 
-      const resp = await fetch(url, options);
+      const resp = await insecureFetch(url, options);
 
       if (req.path.endsWith('/logs') && resp.ok) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -485,7 +517,7 @@ router.get('/', async (req, res) => {
       if (node) {
         const token = generateClusterToken({ node: localNodeId });
         const url = `${getNodeUrl(node.ip)}/api/containers${req.query.system ? '?system=true' : ''}`;
-        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        const resp = await insecureFetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!resp.ok) return res.status(resp.status).json(await resp.json().catch(() => ({})));
         return res.json(await resp.json());
       }

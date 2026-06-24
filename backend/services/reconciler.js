@@ -171,13 +171,18 @@ const reconcileCoreDNS = async (localNodeId) => {
       return;
     }
     
-    // CoreDNS uses etcd/SkyDNS backend — node hostnames are stored in etcd
-    // by registerLocalNode and resolved automatically. No hosts plugin needed.
+    // Build hosts entries from node list rather than using the etcd/SkyDNS
+    // backend, because the CoreDNS etcd plugin has compatibility issues with
+    // etcd authentication and key path formats in the v3 API.
+    const hostsEntries = nodes.map(n => {
+      const ip = n.ip || n.clientIp || '127.0.0.1';
+      const name = n.name || 'unknown';
+      return `${ip} ${name}.core-docker.local`;
+    }).join('\n');
     const corefile = `
 .:53 {
-    etcd {
-        path /skydns
-        endpoint ${process.env.ETCD_HOSTS || 'http://core-docker-etcd:2379'}
+    hosts {
+        ${hostsEntries}
         fallthrough
     }
     forward . ${dnsForwarder}
@@ -237,10 +242,30 @@ const reconcileCoreDNS = async (localNodeId) => {
 
       console.log(`[Reconciler] CoreDNS binding to ${bindIp}:${finalPort}`);
 
+      const env = ['ETCD_HOSTS=' + (process.env.ETCD_HOSTS || 'http://core-docker-etcd:2379')];
+      let etcdUsername = process.env.ETCD_USERNAME || '';
+      let etcdPassword = process.env.ETCD_PASSWORD || '';
+      if (!etcdUsername) {
+        try {
+          const authFile = path.join('/mnt/backup', '__system__', 'etcd', 'auth.json');
+          if (fs.existsSync(authFile)) {
+            const auth = JSON.parse(fs.readFileSync(authFile, 'utf8'));
+            if (auth.username && auth.password) {
+              etcdUsername = auth.username;
+              etcdPassword = auth.password;
+            }
+          }
+        } catch (e) {
+          console.warn('[Reconciler] Failed to read etcd auth file:', e.message);
+        }
+      }
+      if (etcdUsername) env.push('ETCD_USERNAME=' + etcdUsername, 'ETCD_PASSWORD=' + etcdPassword);
+
       container = await docker.createContainer({
         Image: image,
         name: containerName,
         Cmd: ['-conf', '/etc/coredns/Corefile'],
+        Env: env,
         HostConfig: {
           Binds: [`${hostBindSrc}:/etc/coredns/Corefile`],
           PortBindings: {

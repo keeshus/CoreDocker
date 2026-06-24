@@ -12,6 +12,7 @@ import UnsealView from '../components/UnsealView';
 import SetupView from '../components/SetupView';
 import CreateContainer from '../components/CreateContainer';
 import { UIProvider, useUI } from '../lib/UIProvider';
+import { ThemeProvider } from '../lib/ThemeProvider';
 
 function HomeInner() {
   const { showToast, showConfirm } = useUI();
@@ -37,7 +38,7 @@ function HomeInner() {
         fetch('/api/info'),
         fetch('/api/system/status')
       ]);
-      
+
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         setStatus(statusData);
@@ -52,7 +53,6 @@ function HomeInner() {
     }
   };
 
-  // Poll health/ready until the backend is fully booted
   useEffect(() => {
     let cancelled = false;
     (async function pollReady() {
@@ -70,7 +70,6 @@ function HomeInner() {
   useEffect(() => {
     refreshData().finally(() => setLoading(false));
 
-    // Auto-refresh the session token every 4 hours (half of 8h expiry)
     const sessionRefreshInterval = setInterval(async () => {
       try {
         await fetch('/api/system/session/refresh', { method: 'POST' });
@@ -84,10 +83,10 @@ function HomeInner() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'docker-event') {
-          setEvents(prev => [...prev, { 
-            id: Date.now() + Math.random(), 
-            time: new Date().toLocaleTimeString(), 
-            ...data 
+          setEvents(prev => [...prev, {
+            id: Date.now() + Math.random(),
+            time: new Date().toLocaleTimeString(),
+            ...data
           }].slice(-20));
           refreshData();
         } else if (data.type === 'container-stats') {
@@ -205,16 +204,40 @@ function HomeInner() {
   };
 
   if (booting) return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'sans-serif', color: '#64748b', gap: '20px' }}>
-      <div style={{ width: '40px', height: '40px', border: '3px solid #e2e8f0', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-      <div style={{ fontSize: '1.2em', fontWeight: 'bold', color: '#1e293b' }}>CoreDocker is starting up...</div>
-      <div style={{ fontSize: '0.9em' }}>Please wait while services initialize.</div>
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      height: '100vh', fontFamily: 'var(--md-font)', color: 'var(--md-on-surface-variant)', gap: '24px',
+      background: 'var(--md-background)',
+    }}>
+      <div style={{
+        width: '48px', height: '48px',
+        border: '4px solid var(--md-outline-variant)',
+        borderTopColor: 'var(--md-primary)',
+        borderRadius: '50%',
+        animation: 'spin 1s linear infinite'
+      }} />
+      <div style={{
+        fontSize: '1.25rem', fontWeight: 600, color: 'var(--md-on-surface)',
+        letterSpacing: '-0.01em'
+      }}>
+        CoreDocker is starting up...
+      </div>
+      <div style={{ fontSize: '0.9rem', color: 'var(--md-on-surface-variant)' }}>
+        Please wait while services initialize.
+      </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 
-  if (loading) return <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>Loading...</div>;
-  
+  if (loading) return (
+    <div style={{
+      padding: '20px', fontFamily: 'var(--md-font)',
+      color: 'var(--md-on-surface-variant)', background: 'var(--md-background)',
+    }}>
+      Loading...
+    </div>
+  );
+
   if (status && (status.sealed || !status.authenticated)) {
     if (!status.initialized) {
       return <SetupView onSetup={handleUnseal} />;
@@ -223,36 +246,60 @@ function HomeInner() {
   }
 
   return (
-    <AppLayout 
-      activeTab={activeTab} 
-      setActiveTab={setActiveTab} 
-      info={info} 
+    <AppLayout
+      activeTab={activeTab}
+      setActiveTab={setActiveTab}
+      info={info}
       onRefresh={refreshData}
     >
       {activeTab === 'containers' && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '40px' }}>
-            <section style={{ padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              <h2 style={{ marginTop: 0, fontSize: '1.2em', display: 'flex', justifyContent: 'space-between' }}>
-                Live Events 
-                <span style={{ fontSize: '0.6em', color: '#94a3b8', fontWeight: 'normal' }}>Showing last 20 events</span>
+            <section style={{
+              padding: '16px', background: 'var(--md-surface-container)',
+              borderRadius: 'var(--md-radius-lg)', border: '1px solid var(--md-outline-variant)',
+            }}>
+              <h2 style={{
+                marginTop: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--md-on-surface)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                Live Events
+                <span style={{ fontSize: '0.75rem', color: 'var(--md-on-surface-variant)', fontWeight: 400 }}>
+                  Showing last 20 events
+                </span>
               </h2>
-              <div 
+              <div
                 ref={eventScrollRef}
-                style={{ maxHeight: '250px', overflowY: 'auto', fontSize: '0.85em', background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #f1f5f9' }}
+                style={{
+                  maxHeight: '250px', overflowY: 'auto', fontSize: '0.85rem',
+                  background: 'var(--md-surface)', padding: '12px',
+                  borderRadius: 'var(--md-radius-md)', border: '1px solid var(--md-outline-variant)',
+                }}
               >
-                {events.length === 0 ? <p style={{ color: '#94a3b8', margin: 0 }}>Waiting for events...</p> : (
+                {events.length === 0 ? (
+                  <p style={{ color: 'var(--md-on-surface-variant)', margin: 0 }}>Waiting for events...</p>
+                ) : (
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column-reverse' }}>
                     {events.map(e => (
-                      <li key={e.id} style={{ padding: '6px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center' }}>
-                        <span style={{ color: '#94a3b8', fontFamily: 'monospace', width: '100px' }}>[{e.time}]</span> 
-                        <span style={{ 
-                          display: 'inline-block', width: '80px', fontWeight: 'bold', textTransform: 'uppercase', 
-                          color: ['die', 'kill', 'stop'].includes(e.action) ? '#ef4444' : '#10b981'
+                      <li key={e.id} style={{
+                        padding: '6px 0', borderBottom: '1px solid var(--md-outline-variant)',
+                        display: 'flex', alignItems: 'center', gap: '12px',
+                      }}>
+                        <span style={{
+                          color: 'var(--md-on-surface-variant)', fontFamily: 'var(--md-font-mono)',
+                          fontSize: '0.8rem', width: '100px', flexShrink: 0,
+                        }}>
+                          [{e.time}]
+                        </span>
+                        <span style={{
+                          display: 'inline-block', width: '80px', fontWeight: 600,
+                          textTransform: 'uppercase', fontSize: '0.8rem',
+                          color: ['die', 'kill', 'stop'].includes(e.action)
+                            ? 'var(--md-status-failed)' : 'var(--md-status-success)',
                         }}>
                           {e.action}
-                        </span> 
-                        <span style={{ color: '#1e293b' }}>{e.name}</span>
+                        </span>
+                        <span style={{ color: 'var(--md-on-surface)' }}>{e.name}</span>
                       </li>
                     ))}
                   </ul>
@@ -261,7 +308,7 @@ function HomeInner() {
             </section>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px', gap: '10px' }}>
             <CreateContainer onCreated={refreshData} />
             <CreateGroup onCreated={refreshData} />
           </div>
@@ -276,22 +323,50 @@ function HomeInner() {
             if (groupContainers.length === 0 && group.id === 'ungrouped') return null;
 
             return (
-              <section key={group.id} style={{ marginBottom: '40px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-                <div style={{ padding: '15px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.2em', color: '#1e293b' }}>{group.name}</h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '0.85em', color: '#64748b' }}>{groupContainers.length} Container(s)</span>
+              <section key={group.id} style={{
+                marginBottom: '40px',
+                background: 'var(--md-surface-container)',
+                borderRadius: 'var(--md-radius-lg)',
+                border: '1px solid var(--md-outline-variant)',
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  padding: '16px 20px',
+                  background: 'var(--md-surface)',
+                  borderBottom: '1px solid var(--md-outline-variant)',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <h3 style={{
+                    margin: 0, fontSize: '1.1rem', fontWeight: 600,
+                    color: 'var(--md-on-surface)',
+                  }}>
+                    {group.name}
+                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--md-on-surface-variant)' }}>
+                      {groupContainers.length} Container(s)
+                    </span>
                     {group.id !== 'ungrouped' && (
                       <>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleEditGroup(group); }}
-                          style={{ padding: '4px 10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                          style={{
+                            padding: '6px 16px', background: 'var(--md-primary)',
+                            color: 'var(--md-on-primary)', border: 'none',
+                            borderRadius: 'var(--md-radius-full)', cursor: 'pointer',
+                            fontSize: '0.8rem', fontWeight: 600,
+                          }}
                         >
                           Edit
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group); }}
-                          style={{ padding: '4px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}
+                          style={{
+                            padding: '6px 16px', background: 'var(--md-error)',
+                            color: 'var(--md-on-error)', border: 'none',
+                            borderRadius: 'var(--md-radius-full)', cursor: 'pointer',
+                            fontSize: '0.8rem', fontWeight: 600,
+                          }}
                         >
                           Delete
                         </button>
@@ -301,7 +376,13 @@ function HomeInner() {
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ textAlign: 'left', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.85em', background: '#fcfcfc' }}>
+                    <tr style={{
+                      textAlign: 'left',
+                      borderBottom: '1px solid var(--md-outline-variant)',
+                      color: 'var(--md-on-surface-variant)',
+                      fontSize: '0.8rem', fontWeight: 600,
+                      background: 'var(--md-surface-container)',
+                    }}>
                       <th style={{ padding: '10px 20px' }}>Name</th>
                       <th style={{ padding: '10px 20px' }}>Image</th>
                       <th style={{ padding: '10px 20px' }}>State</th>
@@ -324,7 +405,10 @@ function HomeInner() {
                     ))}
                     {groupContainers.length === 0 && (
                       <tr>
-                        <td colSpan="7" style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '0.9em' }}>
+                        <td colSpan="7" style={{
+                          padding: '30px', textAlign: 'center',
+                          color: 'var(--md-on-surface-variant)', fontSize: '0.9rem',
+                        }}>
                           No containers in this group.
                         </td>
                       </tr>
@@ -336,24 +420,24 @@ function HomeInner() {
           })}
 
           {editingContainer && (
-            <CreateContainer 
-              isOpenMode={true} 
-              initialData={editingContainer} 
-              onCreated={() => { setEditingContainer(null); refreshData(); }} 
-              onClose={() => setEditingContainer(null)} 
+            <CreateContainer
+              isOpenMode={true}
+              initialData={editingContainer}
+              onCreated={() => { setEditingContainer(null); refreshData(); }}
+              onClose={() => setEditingContainer(null)}
             />
           )}
           {editingGroup && (
-            <CreateGroup 
-              isOpenMode={true} 
-              initialData={editingGroup} 
-              onCreated={() => { setEditingGroup(null); refreshData(); }} 
-              onClose={() => setEditingGroup(null)} 
+            <CreateGroup
+              isOpenMode={true}
+              initialData={editingGroup}
+              onCreated={() => { setEditingGroup(null); refreshData(); }}
+              onClose={() => setEditingGroup(null)}
             />
           )}
         </>
       )}
-      
+
       {activeTab === 'secrets' && <SecretsTab />}
       {activeTab === 'tasks' && <TasksTab />}
       {activeTab === 'cluster-settings' && <ClusterSettings />}
@@ -364,8 +448,10 @@ function HomeInner() {
 
 export default function Home() {
   return (
-    <UIProvider>
-      <HomeInner />
-    </UIProvider>
+    <ThemeProvider>
+      <UIProvider>
+        <HomeInner />
+      </UIProvider>
+    </ThemeProvider>
   );
 }

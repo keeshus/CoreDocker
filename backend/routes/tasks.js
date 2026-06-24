@@ -1,4 +1,5 @@
 import express from 'express';
+import https from 'https';
 import { getAllTasks, updateTask, runTask } from '../services/scheduler.js';
 import { getNodes } from '../services/db.js';
 import { generateClusterToken } from '../services/secrets.js';
@@ -9,6 +10,37 @@ import path from 'path';
 
 const router = express.Router();
 const TASK_LOG_DIR = '/mnt/non-backup/__system__/tasks';
+
+function insecureFetch(url, opts = {}) {
+  const method = opts.method || 'GET';
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(u, {
+      method,
+      headers: opts.headers || {},
+      rejectUnauthorized: false,
+      timeout: 60000,
+    }, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          json: async () => JSON.parse(body),
+          text: async () => body,
+        });
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Request timed out: ${method} ${url}`));
+    });
+    req.on('error', (err) => reject(err));
+    if (opts.body) req.write(opts.body);
+    req.end();
+  });
+}
 
 // Proxy log requests to remote nodes when the selected node isn't local
 async function proxyLogsToNode(req, res, targetNodeId) {
@@ -21,7 +53,7 @@ async function proxyLogsToNode(req, res, targetNodeId) {
   const token = generateClusterToken({ node: localNodeId });
   const url = `${getNodeUrl(node.ip)}${req.originalUrl}`;
 
-  const resp = await fetch(url, {
+  const resp = await insecureFetch(url, {
     headers: { 'Authorization': `Bearer ${token}` },
   });
   if (!resp.ok) {
@@ -64,6 +96,20 @@ function buildLogEntry(dir, filename, nodeId) {
 
 router.get('/', async (req, res) => {
   try {
+    const selectedNode = req.query.node;
+    if (selectedNode && selectedNode !== localNodeId) {
+      const nodes = await getNodes();
+      const node = nodes.find(n => n.id === selectedNode);
+      if (node) {
+        const token = generateClusterToken({ node: localNodeId });
+        const url = `${getNodeUrl(node.ip)}/api/tasks`;
+        const resp = await insecureFetch(url, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!resp.ok) return res.status(resp.status).json(await resp.json().catch(() => ({})));
+        return res.json(await resp.json());
+      }
+    }
     const tasks = await getAllTasks();
     res.json(tasks);
   } catch (err) {

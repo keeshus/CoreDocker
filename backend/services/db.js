@@ -215,7 +215,7 @@ export const registerLocalNode = async (nodeId, name, ip, clientIp) => {
 export const getNodes = async () => {
   try {
     const allNodes = await db.getAll(NODE_PREFIX);
-    return Object.values(allNodes);
+    return Object.values(allNodes).filter(n => n && n.id && n.name);
   } catch (e) {
     console.error(`Failed to get nodes from ETCD: ${e.message}`);
     throw e;

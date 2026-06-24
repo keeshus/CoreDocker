@@ -46,7 +46,11 @@ router.get('/etcd-status', async (req, res) => {
     let runningContainers = [];
     try {
       const containers = await docker.listContainers({ all: false });
-      runningContainers = containers.map(c => (c.Names?.[0] || '').replace(/^\//, ''));
+      runningContainers = containers.map(c => {
+        const name = (c.Names?.[0] || '').replace(/^\//, '');
+        console.log(`[Nodes] Found container: ${name} (raw Names: ${JSON.stringify(c.Names)})`);
+        return name;
+      });
     } catch (e) {
       console.warn('[Nodes] Failed to list Docker containers:', e.message);
     }
