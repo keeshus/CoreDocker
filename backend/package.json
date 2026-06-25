@@ -8,7 +8,7 @@
     "dev": "nodemon index.js"
   },
   "dependencies": {
-    "dockerode": "^5.0.0",
+    "dockerode": "^5.0.1",
     "etcd3": "^1.1.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
